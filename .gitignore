@@ -1,0 +1,15 @@
+# Build artifacts
+output/
+*.egg-info/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Nix / direnv
+.direnv/
+result
+result-*
+
+# Editors
+.vscode/
+.idea/

@@ -1,0 +1,10 @@
+# Reference manifest only — the authoritative environment is defined in flake.nix.
+# Regenerate/keep in sync with the python312.withPackages list there.
+numpy>=2.4
+pandas>=2.3
+scikit-learn>=1.8
+matplotlib>=3.10
+plotly>=6.7
+umap-learn>=0.5
+hdbscan>=0.8
+pytest>=9.0
