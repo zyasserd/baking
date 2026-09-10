@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import umap
+from matplotlib import colors as mcolors
 
 from .preprocess import CORE_COLUMNS
 from .reduce import ingredient_label
@@ -35,7 +36,9 @@ def biplot(
     codes, uniques = _family_colors(df["family"])
 
     fig, ax = plt.subplots(figsize=(11, 9))
-    cmap = plt.cm.get_cmap("tab20", len(uniques))
+    base_cmap = matplotlib.colormaps["tab20"]
+    color_list = base_cmap(np.linspace(0, 1, len(uniques)))
+    cmap = mcolors.ListedColormap(color_list)
     sc = ax.scatter(Z[:, 0], Z[:, 1], c=codes, cmap=cmap, s=32, alpha=0.85)
 
     # Loading arrows scaled to data extent.
@@ -57,7 +60,7 @@ def biplot(
     ax.set_title("CLR-PCA biplot (ingredient loading arrows)")
 
     handles = [
-        plt.Line2D([0], [0], marker="o", linestyle="", color=cmap(i), label=u)
+        plt.Line2D([0], [0], marker="o", linestyle="", color=color_list[i], label=u)
         for i, u in enumerate(uniques)
     ]
     ax.legend(handles=handles, title="family", bbox_to_anchor=(1.02, 1), loc="upper left")

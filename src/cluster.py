@@ -37,10 +37,11 @@ def write_outputs(outdir: str, df: pd.DataFrame, labels: pd.Series) -> None:
     ari = adjusted_rand_score(df["family"], labels.values)
     n_noise = int((labels == -1).sum())
     counts = labels.value_counts().sort_index()
+    n_clusters = int((counts.index >= 0).sum()) if not counts.empty else 0
 
     lines = [
         f"Adjusted Rand Index vs family: {ari:.3f}",
-        f"Number of clusters: {int((labels >= 0).nunique())}",
+        f"Number of clusters: {n_clusters}",
         f"Noise points (cluster -1): {n_noise}",
         "",
         "Cluster sizes:",

@@ -43,7 +43,7 @@ Let `X` be the n×6 matrix of core ingredient grams.
 ## Setup (Nix flakes)
 
 ```sh
-nix develop              # enter the dev shell (Python 3.12 + all deps)
+nix develop              # enter the dev shell (Python 3.13 + all deps)
 ```
 
 The environment is pinned by `flake.lock` for reproducibility. `requirements.txt`
