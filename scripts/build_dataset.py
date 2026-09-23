@@ -210,10 +210,26 @@ def build(
             meta = food_meta[food_id]
             classified = tags.classify(meta["tags"])
 
-            # Name-rescue the under-tagged pastry class only when tags are weak
-            # or absent; never override a strong/medium tag assignment.
-            if (classified is None or classified[2] == "weak") and tags.is_pastry_title(title):
-                classified = ("pastry", "title_rescue", "medium")
+            # Brownie title-rescue: Food.com files brownies under the generic
+            # "bar-cookies" leaf, so the explicit brownies leaf is tiny. A title
+            # naming a brownie/blondie overrides a generic cookie tag.
+            if (
+                classified is not None
+                and classified[0] == "cookie"
+                and tags.is_brownie_title(title)
+            ):
+                classified = ("brownies", "title_rescue", "medium")
+
+            # Name-rescue the under-tagged pie/pastry class only when tags are
+            # weak or absent; never override a strong/medium tag assignment.
+            if (
+                classified is None or classified[2] == "weak"
+            ) and tags.is_pastry_title(title):
+                classified = ("pie_pastry", "title_rescue", "medium")
+            elif (
+                classified is None or classified[2] == "weak"
+            ) and tags.is_brownie_title(title):
+                classified = ("brownies", "title_rescue", "medium")
 
             if classified is None:
                 continue

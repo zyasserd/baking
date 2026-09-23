@@ -8,6 +8,9 @@ def test_leaf_tag_resolves_to_class():
     assert tags.classify(["sourdough"]) == ("bread", "sourdough", "strong")
     assert tags.classify(["muffins"]) == ("quick_bread", "muffins", "strong")
     assert tags.classify(["cupcakes"]) == ("cake", "cupcakes", "strong")
+    assert tags.classify(["brownies"]) == ("brownies", "brownies", "strong")
+    assert tags.classify(["pies"]) == ("pie_pastry", "pies", "strong")
+    assert tags.classify(["danish"]) == ("pie_pastry", "danish", "strong")
 
 
 def test_leaf_beats_parent():
@@ -50,3 +53,4 @@ def test_pastry_title_rescue_keywords():
 def test_primary_classes_count():
     assert len(tags.PRIMARY_CLASSES) == 7
     assert "dessert_other" not in tags.PRIMARY_CLASSES
+    assert {"pie_pastry", "brownies"} <= set(tags.PRIMARY_CLASSES)

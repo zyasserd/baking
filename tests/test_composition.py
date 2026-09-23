@@ -122,14 +122,14 @@ def test_archtypes_match_book_parts():
     assert composition.ARCHETYPES["shortbread"] == [3, 0, 0, 2, 1]
 
 
-def test_tetrahedron_matrix_folds_fat_and_sugar():
+def test_tetrahedron_matrix_folds_egg_into_liquid():
     df = _df()
     M = composition.tetrahedron_matrix(df)
     assert M.shape == (3, 4)
-    # R1 (bread): flour=500, liquid=300, egg=0, fat+sugar=0
+    # R1 (bread): flour=500, wet=300+0=300, fat=0, sugar=0
     np.testing.assert_allclose(M[0], [500.0, 300.0, 0.0, 0.0])
-    # R2 (cookie): flour=300, liquid=0, egg=100, fat+sugar=200+300=500
-    np.testing.assert_allclose(M[1], [300.0, 0.0, 100.0, 500.0])
+    # R2 (cookie): flour=300, wet=0+100=100, fat=200, sugar=300
+    np.testing.assert_allclose(M[1], [300.0, 100.0, 200.0, 300.0])
 
 
 def test_barycentric_3d_points_lie_in_tetrahedron():
@@ -144,9 +144,10 @@ def test_barycentric_3d_points_lie_in_tetrahedron():
 
 
 def test_tetrahedron_fold_preserves_separation():
-    # Folding fat+sugar keeps every pair of book archetypes at Aitchison
-    # distance >= 0.4; egg+fat would collapse choux/crepe and quick_bread/
-    # pancake (min ~0.29). This regression test documents that choice.
+    # Folding egg into liquid keeps every pair of book archetypes at Aitchison
+    # distance >= 0.4 (min 0.57, biscuit vs quick_bread) — the best of all ten
+    # single-pair merges, which is why the tetrahedron uses flour / liquid+egg /
+    # fat / sugar. This regression test documents that choice.
     M = composition.tetrahedron_archetypes()
     P = preprocess.closure(M)
     P = preprocess.multiplicative_replacement(P)
@@ -159,8 +160,12 @@ def test_tetrahedron_fold_preserves_separation():
 def test_tetrahedron_archetypes_shape():
     A = composition.tetrahedron_archetypes()
     assert A.shape == (len(composition.ARCHETYPES), 4)
-    # bread has fat+sugar == 0 (the richness fold is empty for bread)
+    # bread: flour 5, liquid+egg 3+0, fat 0, sugar 0
     bread_idx = list(composition.ARCHETYPES).index("bread")
+    assert A[bread_idx, 1] == 3.0
+    assert A[bread_idx, 2] == 0.0
     assert A[bread_idx, 3] == 0.0
+    # cookie: flour 3, liquid+egg 0+1, fat 2, sugar 3
     cookie_idx = list(composition.ARCHETYPES).index("cookie")
-    assert A[cookie_idx, 3] == 2.0 + 3.0
+    assert A[cookie_idx, 1] == 1.0
+    assert A[cookie_idx, 3] == 3.0

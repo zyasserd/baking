@@ -24,18 +24,27 @@ hand-tuned guesses (see *Composition vectors* below).
   (`structural`):
 
   ```
-  batter < bread < pastry < pie_tart < quick_bread < cake < cookie
+  batter < bread < pie_pastry < quick_bread < cake < cookie < brownies
   ```
 
 - But every class has a large spread, so the classes **overlap heavily**:
-  clustering the ratios and scoring against the tags gives **ARI ≈ 0.15** and a
-  near-zero silhouette. Baking is a **continuum**, not a set of discrete
+  clustering the ratios and scoring against the tags gives **ARI ≈ 0.16–0.18**
+  and a near-zero silhouette. Baking is a **continuum**, not a set of discrete
   islands; the tags are fuzzy boundaries drawn on that continuum.
+- **The best 3D simplex view folds egg into liquid.** Of the ten possible
+  4-part sub-compositions (one merged pair), clustering the tag classes in
+  `flour / liquid+egg / fat / sugar` separates them best (ARI ≈ 0.21 vs ≈ 0.17
+  for every alternative) and keeps the book archetypes most distinct (min
+  pairwise Aitchison distance 0.57). Egg alone is the *weakest* single part
+  (class-separation F ≈ 590, vs ≈ 3100 for liquid and sugar) — its signal only
+  appears when combined with liquid, which makes physical sense (an egg is ~75%
+  water). Clustering in the top-3 log-ratio PCs (ARI 0.19) beats 2D (0.15);
+  PC4 is noise.
 - **Full vs structural**: structural (add-ins excluded, the book's convention)
-  scores marginally better than decomposing add-ins into the ratio — ARI 0.153
-  vs 0.151, silhouette −0.017 vs −0.055. Decomposing add-ins also inflates the
-  cookie class's spread (their chocolate/fruit sugar+fat varies hugely). So
-  Ruhlman's add-in exclusion holds up quantitatively.
+  scores better than decomposing add-ins into the ratio — ARI 0.176 vs 0.163
+  (3-D clustering), silhouette −0.051 vs −0.044. Decomposing add-ins also
+  inflates the cookie class's spread (their chocolate/fruit sugar+fat varies
+  hugely). So Ruhlman's add-in exclusion holds up quantitatively.
 
 ## Data
 
@@ -181,24 +190,33 @@ reproduce.
 ## Taxonomy (a parameter, not a fact)
 
 `src/tags.py` maps Food.com tags to 7 primary classes plus a weak tier, by
-precedence (leaf tag beats parent) with a `strong`/`medium`/`weak` confidence:
+precedence (leaf tag beats parent) with a `strong`/`medium`/`weak` confidence.
+The classes are *compositional* families: muffins and scones sit with
+`quick_bread` (the same 2:2:1:1 batter as a loaf), and pie dough and laminated
+pastry are one `pie_pastry` family (both fat-dominant, egg-free, water-poor
+doughs — the difference is technique, not ratio):
 
 | Class | Tags | Book (Ruhlman) | Wiki |
 |---|---|---|---|
 | `bread` | `breads`, `sourdough`, `rolls-biscuits` | Bread | Bread, buns, rolls |
 | `quick_bread` | `quick-breads`, `muffins`, `scones`, `coffee-cakes` | Quick Bread, Muffin | Muffin, quick bread |
 | `cake` | `cakes`, `cupcakes`, `cheesecake` | Pound/Sponge/Quick Cake | Cake, torte |
-| `cookie` | `cookies-and-brownies`, `bar/drop/hand/rolled-cookies`, `brownies` | Cookie Dough | Cookie, brownie |
-| `pie_tart` | `pies-and-tarts`, `pies`, `tarts`, `savory-pies` | Pie Dough | Pie, tart |
-| `pastry` | `danish` + title rescue (croissant/puff/choux/strudel/phyllo/…) | Pâte à Choux, Viennoiserie | Pastry, viennoiserie |
+| `cookie` | `cookies-and-brownies`, `bar/drop/hand/rolled-cookies` | Cookie Dough | Cookie |
+| `brownies` | `brownies` + title rescue (brownie/blondie) | — | Brownie, blondie |
+| `pie_pastry` | `pies-and-tarts`, `pies`, `tarts`, `savory-pies`, `danish`, `crusts-pastry-dough-2` + title rescue | Pie Dough, Pâte à Choux, Viennoiserie | Pie, tart, pastry |
 | `batter` | `pancakes-and-waffles` | Crepe, Pancake | — |
 | `dessert_other` *(weak)* | `desserts` only, `cobblers-and-crisps`, `puddings-and-mousses` | — | — |
 
-`pastry` is under-represented in Food.com tags (few laminated-dough tags exist),
-so a **title rescue** broadens recall: titles naming croissants, puff/rough
-pastry, choux, éclairs, strudel, phyllo, palmiers, turnovers, empanadas, … are
-assigned to `pastry` *only* when the tags are weak or absent. This grows the
-class to a usable size (n ≈ 730) without overriding strong tag assignments.
+Two classes are under-represented in Food.com tags and use **title rescues**:
+
+- `pie_pastry` — few laminated-dough tags exist, so titles naming croissants,
+  puff/rough pastry, choux, éclairs, strudel, phyllo, palmiers, turnovers,
+  empanadas, … are assigned *only when the tags are weak or absent* (n ≈ 3,200
+  after merging with pies/tarts; title-agreement 0.87).
+- `brownies` — Food.com files brownies under the generic `bar-cookies` leaf, so
+  the explicit `brownies` leaf has only ~70 recipes. A title naming a
+  brownie/blondie **overrides a generic cookie tag** (n ≈ 1,250;
+  title-agreement 1.00).
 
 The `dessert_other` weak tier is excluded from primary scoring. **The taxonomy
 is a parameter** — if a class proves unreliable, edit the table and re-run.
@@ -276,11 +294,16 @@ nix develop -c pytest tests/
   rich-vs-lean balance Ruhlman describes.
 - `class_pc1_summary.csv` — the classes order correctly along PC1, confirming the
   ratio *does* encode the right gradient.
+- `simplex_3d.html` — the 3D tetrahedron `flour / liquid+egg / fat / sugar`; the
+  egg-into-liquid fold separates the tag classes best of all ten merges (see
+  *Result*).
+- Clustering runs in the **top-3 log-ratio PCs** (not 2): 3D beats 2D (ARI
+  0.19 vs 0.15) and PC4 only adds noise.
 - `simplex_comparison.csv` — full vs structural: structural (add-ins excluded)
   edges out full, supporting Ruhlman's add-in exclusion.
 - `tag_confusion.png` and `cluster_report.txt` — the classes bleed into each
-  other (ARI ≈ 0.15, silhouette ≈ 0): baking is a continuum, and the Food.com
-  tags are fuzzy labels on it, not crisp ratio clusters.
+  other (ARI ≈ 0.16–0.18, silhouette ≈ 0): baking is a continuum, and the
+  Food.com tags are fuzzy labels on it, not crisp ratio clusters.
 
 `tag_validation.txt` flags which classes are trustworthy: `bread` is the most
 heterogeneous (only ~46% contain yeast), because Food.com's `breads` tag blurs

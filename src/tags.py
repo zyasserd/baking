@@ -23,6 +23,12 @@ Classes nobody cares about (angel food, genoise, choux-as-its-own-class) are
 folded into their parents; ``cake-fillings-and-frostings`` is dropped because a
 frosting is not itself a baked good; the book's ambiguous "biscuit" is dropped as
 a class (US biscuit -> ``quick_bread``, UK biscuit -> ``cookie``).
+
+The taxonomy folds the *compositional* families together: muffins and scones sit
+with ``quick_bread`` (same 2:2:1:1 batter as a loaf); pie dough and laminated
+pastry are one ``pie_pastry`` family (both are fat-dominant, egg-free, water-poor
+doughs that differ only in technique); and ``brownies`` are split out of
+``cookie`` (their richer, eggier, low-leavener ratio is a distinct archetype).
 """
 
 from __future__ import annotations
@@ -32,10 +38,10 @@ from __future__ import annotations
 CLASS_PRIORITY = [
     "cookie",
     "cake",
-    "pie_tart",
-    "pastry",
+    "pie_pastry",
     "bread",
     "quick_bread",
+    "brownies",
     "batter",
     "dessert_other",
 ]
@@ -63,17 +69,16 @@ TAXONOMY: dict[str, dict[str, list[str]]] = {
             "drop-cookies",
             "hand-formed-cookies",
             "rolled-cookies",
-            "brownies",
         ],
         "parents": ["cookies-and-brownies"],
     },
-    "pie_tart": {
-        "leaves": ["pies", "tarts", "savory-pies"],
-        "parents": ["pies-and-tarts"],
-    },
-    "pastry": {
-        "leaves": ["danish", "crusts-pastry-dough-2"],
+    "brownies": {
+        "leaves": ["brownies"],
         "parents": [],
+    },
+    "pie_pastry": {
+        "leaves": ["pies", "tarts", "savory-pies", "danish", "crusts-pastry-dough-2"],
+        "parents": ["pies-and-tarts"],
     },
     "batter": {
         "leaves": ["pancakes-and-waffles"],
@@ -90,7 +95,7 @@ DROPPED_TAGS = frozenset(
     {"cake-fillings-and-frostings", "baking", "bread-machine", "yeast"}
 )
 
-# Title keywords that rescue the under-tagged ``pastry`` class (croissants,
+# Title keywords that rescue the under-tagged ``pie_pastry`` class (croissants,
 # puff, choux are rarely tagged in Food.com). Used only when tags are weak or
 # absent, so it never overrides a strong/medium tag assignment.
 PASTRY_TITLE_KEYWORDS = (
@@ -190,3 +195,14 @@ def is_pastry_title(title: str) -> bool:
     """True if a title names a laminated/choux/viennoiserie product."""
     t = (title or "").lower()
     return any(k in t for k in PASTRY_TITLE_KEYWORDS)
+
+
+# Brownies are filed under Food.com's generic "bar-cookies" leaf, so the
+# explicit "brownies" leaf is nearly empty; the title is the reliable signal.
+BROWNIE_TITLE_KEYWORDS = ("brownie", "brownies", "blondie", "blondies")
+
+
+def is_brownie_title(title: str) -> bool:
+    """True if the recipe title names a brownie/blondie."""
+    t = (title or "").lower()
+    return any(k in t for k in BROWNIE_TITLE_KEYWORDS)

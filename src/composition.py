@@ -137,16 +137,20 @@ def nearest_archetype(
     return names[idx], np.sqrt(dist2[np.arange(clr.shape[0]), idx])
 
 
-# The 4-part sub-composition used to draw the 4-D simplex in 3-D. Folding
-# fat+sugar into one "richness" axis keeps the book archetypes separated
-# (min Aitchison distance 0.44, no collisions) while keeping sugar visible.
-TETRAHEDRON_PARTS: list[str] = ["flour", "liquid", "egg", "fat+sugar"]
+# The 4-part sub-composition used to draw the 4-D simplex in 3-D. Egg folds
+# into liquid ("wet": an egg is ~75% water and behaves as a hydrated structure-
+# builder). This merge is chosen empirically, not by taste: clustering the tag
+# classes in each candidate 4-part sub-composition (all 10 single-pair merges)
+# gives ARI 0.21 for liquid+egg vs ~0.17 for every alternative (including the
+# fat+sugar "richness" fold), and it also keeps the book archetypes most
+# distinct (min pairwise Aitchison distance 0.57 vs 0.44 for fat+sugar).
+TETRAHEDRON_PARTS: list[str] = ["flour", "liquid+egg", "fat", "sugar"]
 
 _TETRA_SOURCES: list[list[str]] = [
     ["flour_g"],
-    ["water_g", "milk_g"],
-    ["egg_g"],
-    ["fat_g", "sugar_g"],
+    ["water_g", "milk_g", "egg_g"],
+    ["fat_g"],
+    ["sugar_g"],
 ]
 
 
@@ -164,9 +168,9 @@ def tetrahedron_archetypes() -> np.ndarray:
     A = np.array([ARCHETYPES[n] for n in ARCHETYPES], dtype=float)
     out = np.zeros((len(ARCHETYPES), 4))
     out[:, 0] = A[:, idx["flour"]]
-    out[:, 1] = A[:, idx["liquid"]]
-    out[:, 2] = A[:, idx["egg"]]
-    out[:, 3] = A[:, idx["fat"]] + A[:, idx["sugar"]]
+    out[:, 1] = A[:, idx["liquid"]] + A[:, idx["egg"]]
+    out[:, 2] = A[:, idx["fat"]]
+    out[:, 3] = A[:, idx["sugar"]]
     return out
 
 
