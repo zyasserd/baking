@@ -1,0 +1,92 @@
+"""Dimensionality checks via log-ratio principal component analysis.
+
+PCA is run on the CLR coordinates (equivalent to PCA on ILR up to rotation:
+identical eigenvalues). The simplex of D parts has rank D-1, so the analysis
+reports how many of those dimensions carry real variance and interprets each
+retained component as a balance of parts.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import pandas as pd
+
+
+def pca(clr: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Log-ratio PCA on CLR coordinates.
+
+    Returns ``(scores, eigenvalues, loadings, mean)`` where:
+    - ``scores`` is (n, D-1) (the last CLR singular component is dropped),
+    - ``eigenvalues`` is (D-1,) in descending order,
+    - ``loadings`` is (D, D-1): columns are component loadings on the D CLR axes
+      (one axis per part), so each component reads as a part balance,
+    - ``mean`` is the (D,) CLR center used for projection.
+    """
+    clr = np.asarray(clr, dtype=float)
+    mean = clr.mean(axis=0)
+    X = clr - mean
+
+    cov = X.T @ X / X.shape[0]
+    eigvals, eigvecs = np.linalg.eigh(cov)
+    order = np.argsort(eigvals)[::-1]
+    eigvals = eigvals[order]
+    eigvecs = eigvecs[:, order]
+
+    # CLR is over-parameterized: the last eigenvalue is (numerically) zero.
+    eigvals = eigvals[:-1]
+    eigvecs = eigvecs[:, :-1]
+
+    scores = X @ eigvecs
+    return scores, eigvals, eigvecs, mean
+
+
+def project(clr: np.ndarray, mean: np.ndarray, loadings: np.ndarray) -> np.ndarray:
+    """Project new CLR rows onto existing PCA loadings."""
+    clr = np.asarray(clr, dtype=float)
+    return (clr - mean) @ loadings
+
+
+def variance_table(eigvals: np.ndarray) -> pd.DataFrame:
+    """Per-component eigenvalue, fraction and cumulative fraction of variance."""
+    eigvals = np.asarray(eigvals, dtype=float)
+    total = eigvals.sum()
+    if total <= 0:
+        total = 1.0
+    n = len(eigvals)
+    frac = eigvals / total
+    return pd.DataFrame(
+        {
+            "component": [f"PC{i + 1}" for i in range(n)],
+            "eigenvalue": eigvals,
+            "variance_fraction": frac,
+            "cumulative_fraction": np.cumsum(frac),
+        }
+    )
+
+
+def loading_table(loadings: np.ndarray, parts: list[str]) -> pd.DataFrame:
+    """Loadings as a (parts x components) frame for human reading."""
+    loadings = np.asarray(loadings, dtype=float)
+    n = loadings.shape[1]
+    return pd.DataFrame(
+        loadings,
+        index=parts,
+        columns=[f"PC{i + 1}" for i in range(n)],
+    )
+
+
+def interpret_components(loadings: np.ndarray, parts: list[str]) -> list[str]:
+    """A one-line human reading of each component as a part balance.
+
+    Returns a list of strings like ``"PC1: +sugar +fat vs -flour -liquid"``.
+    """
+    loadings = np.asarray(loadings, dtype=float)
+    lines = []
+    for k in range(loadings.shape[1]):
+        col = loadings[:, k]
+        pos = [parts[i] for i in np.argsort(-col) if col[i] > 0]
+        neg = [parts[i] for i in np.argsort(col) if col[i] < 0]
+        pos_s = "+" + " +".join(pos) if pos else ""
+        neg_s = "-" + " -".join(neg) if neg else ""
+        lines.append(f"PC{k + 1}: {pos_s} {neg_s}".strip())
+    return lines

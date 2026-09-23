@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from src import preprocess, reduce
+from src import preprocess
 
 
 def test_closure_pound_cake_four_equal():
@@ -42,25 +42,3 @@ def test_clr_row_means_are_zero():
     P = preprocess.multiplicative_replacement(P)
     Y = preprocess.clr(P)
     np.testing.assert_allclose(Y.mean(axis=1), 0.0, atol=1e-9)
-
-
-def test_name_axes_format():
-    rng = np.random.default_rng(2)
-    W = rng.normal(size=(3, 6))
-    names = reduce.name_axes(W)
-    assert len(names) == 3
-    for i, name in enumerate(names, start=1):
-        assert name.startswith(f"PC{i} ≈ log[")
-        assert name.endswith("]")
-
-
-def test_pca_shapes_and_variance():
-    rng = np.random.default_rng(3)
-    X = rng.uniform(1, 500, size=(100, 6))
-    P = preprocess.closure(X)
-    P = preprocess.multiplicative_replacement(P)
-    Y = preprocess.clr(P)
-    pca, Z, W = reduce.fit_pca(Y, n_components=3)
-    assert Z.shape == (100, 3)
-    assert W.shape == (3, 6)
-    assert abs(float(pca.explained_variance_ratio_.sum()) - float(np.sum(pca.explained_variance_ratio_))) < 1e-12

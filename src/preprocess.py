@@ -8,7 +8,7 @@ import pandas as pd
 CORE_COLUMNS = ["flour_g", "sugar_g", "fat_g", "egg_g", "milk_g", "water_g"]
 SIDE_COLUMNS = ["salt_g", "leavener_g", "yeast_g"]
 NUMERIC_COLUMNS = CORE_COLUMNS + SIDE_COLUMNS
-REQUIRED_COLUMNS = ["recipe_id", "name", "family"] + NUMERIC_COLUMNS
+REQUIRED_COLUMNS = ["recipe_id", "name", "tag_coarse", "tag_fine"] + NUMERIC_COLUMNS
 
 
 def closure(X: np.ndarray) -> np.ndarray:
@@ -47,6 +47,50 @@ def clr(P: np.ndarray) -> np.ndarray:
         raise ValueError("clr: proportions must be strictly positive (apply replacement first)")
     log_P = np.log(P)
     return log_P - log_P.mean(axis=1, keepdims=True)
+
+
+def ilr(P: np.ndarray, psi: np.ndarray | None = None) -> np.ndarray:
+    """Isometric log-ratio transform (rows -> orthonormal R^(D-1) balances).
+
+    By default uses the sequential binary partition (pivot balances) where the
+    k-th coordinate contrasts part k against the geometric mean of the parts
+    that follow it:
+
+        z_k = sqrt((D-k-1) / (D-k)) * log( x_k / g(x_{k+1}, ..., x_{D-1}) )
+
+    Euclidean distance in this space equals the Aitchison distance, so it is
+    the right coordinate system for PCA and clustering on the simplex.
+    """
+    P = np.asarray(P, dtype=float)
+    if np.any(P <= 0):
+        raise ValueError("ilr: proportions must be strictly positive (apply replacement first)")
+
+    D = P.shape[1]
+    if psi is not None:
+        psi = np.asarray(psi, dtype=float)
+        if psi.shape != (D - 1, D):
+            raise ValueError("ilr: psi must have shape (D-1, D)")
+        log_P = np.log(P)
+        Z = np.zeros((P.shape[0], D - 1))
+        for k, row in enumerate(psi):
+            pos = row > 0
+            neg = row < 0
+            r = int(pos.sum())
+            s = int(neg.sum())
+            coef = np.sqrt(r * s / (r + s))
+            Z[:, k] = coef * (
+                log_P[:, pos].mean(axis=1) - log_P[:, neg].mean(axis=1)
+            )
+        return Z
+
+    log_P = np.log(P)
+    Z = np.zeros((P.shape[0], D - 1))
+    for k in range(D - 1):
+        # log of geometric mean of the trailing parts
+        gm = log_P[:, k + 1 :].mean(axis=1)
+        coef = np.sqrt((D - k - 1) / (D - k))
+        Z[:, k] = coef * (log_P[:, k] - gm)
+    return Z
 
 
 def load_recipes(path: str) -> tuple[pd.DataFrame, pd.DataFrame]:

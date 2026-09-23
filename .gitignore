@@ -13,3 +13,9 @@ result-*
 # Editors
 .vscode/
 .idea/
+
+# Raw data
+data/raw
+
+# USDA reference (downloaded/derived by scripts/fetch_fdc.py)
+data/reference/
