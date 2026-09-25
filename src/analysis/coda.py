@@ -1,10 +1,25 @@
-"""Loading, validation, and the closure/zero-replacement/CLR transforms."""
+"""Loading the preprocessed dataset and the compositional transforms.
+
+Stage 1 writes per-recipe simplex proportions (``*_p`` columns summing to 1).
+This module loads and validates that dataset and provides the log-ratio
+transforms (closure, multiplicative zero-replacement, CLR, ILR) used by the
+analysis stage.
+"""
 
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 
+import config
+
+from ..preprocess import parts
+
+# Gram columns kept as provenance (the structural decomposition).
+GRAM_COLUMNS = parts.GRAM_COLUMNS
+
+# Columns whose zeros must be replaced before the log-ratio transforms: the
+# six structural grams that fold into the five analysis parts (liquid = milk + water).
 CORE_COLUMNS = ["flour_g", "sugar_g", "fat_g", "egg_g", "milk_g", "water_g"]
 SIDE_COLUMNS = ["salt_g", "leavener_g", "yeast_g"]
 NUMERIC_COLUMNS = CORE_COLUMNS + SIDE_COLUMNS
@@ -23,9 +38,10 @@ def closure(X: np.ndarray) -> np.ndarray:
 def multiplicative_replacement(P: np.ndarray) -> np.ndarray:
     """Replace zeros with a per-row delta and re-normalize.
 
-    For each row, delta = 0.5 * min(positive values in the row). Every zero is
-    set to delta, then the row is re-normalized to sum to 1 (multiplicative
-    replacement as in Martin-Fernandez et al.).
+    For each row, delta = ``config.ZERO_REPLACEMENT_DELTA`` * min(positive
+    values in the row). Every zero is set to delta, then the row is
+    re-normalized to sum to 1 (multiplicative replacement as in
+    Martin-Fernandez et al.).
     """
     P = np.asarray(P, dtype=float).copy()
     if np.any(P < 0):
@@ -34,7 +50,7 @@ def multiplicative_replacement(P: np.ndarray) -> np.ndarray:
     zeros = P == 0
     # min positive per row (rows with no zeros get +inf delta, which is unused)
     min_positive = np.where(P > 0, P, np.inf).min(axis=1, keepdims=True)
-    delta = 0.5 * min_positive
+    delta = config.ZERO_REPLACEMENT_DELTA * min_positive
 
     P = np.where(zeros, delta, P)
     return P / P.sum(axis=1, keepdims=True)
@@ -94,7 +110,7 @@ def ilr(P: np.ndarray, psi: np.ndarray | None = None) -> np.ndarray:
 
 
 def load_recipes(path: str) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Load and validate the recipe CSV.
+    """Load and validate the preprocessed recipe dataset.
 
     Returns (kept, excluded) where kept has flour_g > 0 and excluded has
     flour_g == 0 (to be written out for later handling).
@@ -117,11 +133,3 @@ def load_recipes(path: str) -> tuple[pd.DataFrame, pd.DataFrame]:
     kept = df[df["flour_g"] > 0].reset_index(drop=True)
     excluded = df[df["flour_g"] == 0].reset_index(drop=True)
     return kept, excluded
-
-
-def build_clr_matrix(df: pd.DataFrame) -> np.ndarray:
-    """Run the full simplex transform on the core ingredient columns."""
-    X = df[CORE_COLUMNS].to_numpy(dtype=float)
-    P = closure(X)
-    P = multiplicative_replacement(P)
-    return clr(P)

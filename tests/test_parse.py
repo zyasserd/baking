@@ -2,7 +2,7 @@
 
 import pytest
 
-from src import parse
+from src.preprocess import parse
 
 
 def test_plain_ingredient():

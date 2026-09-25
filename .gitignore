@@ -14,8 +14,12 @@ result-*
 .vscode/
 .idea/
 
-# Raw data
+# Raw data — nix-fetched (pinned in flake.nix) or manually downloaded
+# (RAW_recipes.csv from Kaggle; sha256 pinned in config.py).
 data/raw
 
-# USDA reference (downloaded/derived by scripts/fetch_fdc.py)
+# Derived USDA reference (built by src/preprocess/fdc.py from the fetched zip)
 data/reference/
+
+# Interim per-ingredient database (provenance artifact of stage 1)
+data/interim/

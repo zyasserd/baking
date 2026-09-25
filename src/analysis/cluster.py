@@ -3,7 +3,8 @@
 The simplex is not Euclidean, so outliers are found and recipes are clustered
 using the isometric log-ratio coordinates, where Euclidean distance equals the
 Aitchison distance. Robust Mahalanobis distance flags parse-error outliers;
-k-means (or Gaussian mixture) clusters the cleaned data.
+k-means (or Gaussian mixture) clusters the cleaned data. Parameters (contamination,
+method, seed) live in the ANALYSIS section of ``config``.
 """
 
 from __future__ import annotations
@@ -17,16 +18,23 @@ from sklearn.covariance import EllipticEnvelope
 from sklearn.metrics import adjusted_rand_score
 from sklearn.mixture import GaussianMixture
 
+import config
 
-def detect_outliers(ilr: np.ndarray, contamination: float = 0.01, seed: int = 0) -> np.ndarray:
+
+def detect_outliers(ilr: np.ndarray, contamination: float | None = None, seed: int | None = None) -> np.ndarray:
     """Boolean inlier mask from robust Mahalanobis distance in ILR space.
 
     ``EllipticEnvelope`` fits a robust (Minimum Covariance Determinant)
     Gaussian; points beyond the ``contamination`` tail are flagged as outliers.
+    Defaults come from ``config``.
     """
     ilr = np.asarray(ilr, dtype=float)
     if len(ilr) < 10:
         return np.ones(len(ilr), dtype=bool)
+    if contamination is None:
+        contamination = config.OUTLIER_CONTAMINATION
+    if seed is None:
+        seed = config.RANDOM_SEED
     detector = EllipticEnvelope(contamination=contamination, random_state=seed)
     labels = detector.fit_predict(ilr)  # +1 inlier, -1 outlier
     return labels == 1
@@ -35,14 +43,18 @@ def detect_outliers(ilr: np.ndarray, contamination: float = 0.01, seed: int = 0)
 def run_clustering(
     X: np.ndarray,
     n_clusters: int,
-    method: str = "kmeans",
-    seed: int = 0,
+    method: str | None = None,
+    seed: int | None = None,
 ) -> np.ndarray:
-    """Cluster ILR coordinates.
+    """Cluster log-ratio coordinates.
 
-    ``method`` is ``"kmeans"`` (default) or ``"gmm"``.
+    ``method`` is ``"kmeans"`` (default from ``config``) or ``"gmm"``.
     """
     X = np.asarray(X, dtype=float)
+    if method is None:
+        method = config.CLUSTER_METHOD
+    if seed is None:
+        seed = config.CLUSTER_SEED
     if method == "gmm":
         model = GaussianMixture(
             n_components=n_clusters,
@@ -94,13 +106,9 @@ def write_outputs(
         fh.write("\n".join(lines) + "\n")
 
 
-def confusion_table(
-    true: np.ndarray, clusters: np.ndarray
-) -> tuple[pd.DataFrame, list[str], list[str]]:
-    """Return a (true-class x cluster) count table with the two label vocabularies."""
+def confusion_table(true: np.ndarray, clusters: np.ndarray) -> pd.DataFrame:
+    """Return a (true-class x cluster) count table."""
     table = pd.crosstab(pd.Series(true), pd.Series(clusters, name="cluster"))
-    cols = [f"cluster {c}" for c in table.columns]
-    table.columns = cols
-    classes = [str(c) for c in table.index]
-    table.index = classes
-    return table, classes, cols
+    table.columns = [f"cluster {c}" for c in table.columns]
+    table.index = [str(c) for c in table.index]
+    return table

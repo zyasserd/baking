@@ -5,7 +5,8 @@
 scatter; ``ternary`` draws the simplex in (flour, liquid, enrich) barycentric
 coordinates; ``cluster_scatter`` colors the PCA projection by cluster;
 ``simplex_3d`` draws the 4-part tetrahedron (with the egg-in-liquid fold) and
-``pca_3d`` the top-3 log-ratio components.
+``pca_scatter_2d`` / ``pca_scatter_3d`` the interactive top-2/3 log-ratio
+components.
 """
 
 from __future__ import annotations
@@ -21,7 +22,11 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
-from .composition import PARTS, TETRAHEDRON_PARTS, tetrahedron_vertices
+import config
+
+from .folds import tetrahedron_vertices
+
+TETRAHEDRON_PARTS = config.TETRAHEDRON_PARTS
 
 # Click a recipe point to open its source link in a new tab. Fired from the
 # ``customdata`` attached to every recipe trace below.
@@ -39,11 +44,11 @@ gd.on('plotly_click', function(data) {
 
 
 def _recipe_urls(df: pd.DataFrame) -> np.ndarray:
-    """Return a fully-formed URL per recipe (empty string if no link)."""
-    if "link" not in df.columns:
+    """Return a fully-formed URL per recipe (empty string if no url)."""
+    if "url" not in df.columns:
         return np.array([""] * len(df), dtype=object)
     urls = []
-    for v in df["link"].astype(object):
+    for v in df["url"].astype(object):
         if v is None:
             urls.append("")
             continue
@@ -132,7 +137,7 @@ def pca_biplot(
     # Loadings as arrows, scaled to the score spread.
     loadings = np.asarray(loadings, dtype=float)
     scale = max(np.abs(scores[:, :2]).max() / np.abs(loadings[:, :2]).max(), 1e-9)
-    for i, part in enumerate(PARTS):
+    for i, part in enumerate(config.ANALYSIS_PARTS):
         ax.annotate(
             "",
             xy=(loadings[i, 0] * scale, loadings[i, 1] * scale),
@@ -179,7 +184,7 @@ def ternary(outdir: str, df: pd.DataFrame) -> None:
     """Flour vs liquid vs (egg+fat+sugar) barycentric scatter.
 
     ``df`` must carry the ``flour_p``, ``liquid_p``, ``egg_p``, ``fat_p`` and
-    ``sugar_p`` fraction columns from ``composition.compositions``.
+    ``sugar_p`` fraction columns from the preprocessed dataset (stage 1).
     """
     flour = df["flour_p"].to_numpy()
     liquid = df["liquid_p"].to_numpy()
@@ -276,16 +281,16 @@ def simplex_3d(
     archetype_coords: np.ndarray,
     archetype_names: np.ndarray,
 ) -> None:
-    """Interactive 3-D tetrahedron of the (flour, liquid, egg, fat+sugar) simplex.
+    """Interactive 3-D tetrahedron of the (flour, liquid+egg, fat, sugar) simplex.
 
     ``coords`` are the barycentric 3-D coordinates of the recipes; the four
-    corners are flour, liquid, egg and fat+sugar (the "richness" fold). The ten
+    corners follow ``config.TETRAHEDRON_PARTS`` (the egg-into-liquid fold). The
     book archetypes are drawn as labeled stars.
     """
     fig = go.Figure()
 
     urls = _recipe_urls(df)
-    has_links = "link" in df.columns
+    has_links = "url" in df.columns
 
     vertices = tetrahedron_vertices()
     for trace in _tetrahedron_traces(vertices):
@@ -338,7 +343,7 @@ def simplex_3d(
     )
 
     fig.update_layout(
-        title="Baking simplex in 3-D: flour · liquid · egg · (fat + sugar)",
+        title="Baking simplex in 3-D: flour · liquid+egg · fat · sugar",
         scene=dict(
             xaxis=dict(showticklabels=False, title=""),
             yaxis=dict(showticklabels=False, title=""),
@@ -351,23 +356,21 @@ def simplex_3d(
     _write_html(fig, os.path.join(outdir, "simplex_3d.html"), has_links)
 
 
-def embedding_2d(
+def pca_scatter_2d(
     outdir: str,
-    method: str,
     coords: np.ndarray,
     df: pd.DataFrame,
     archetype_coords: np.ndarray,
     archetype_names: np.ndarray,
     axis_labels: tuple[str, str] | None = None,
 ) -> None:
-    """Interactive 2-D scatter of an embedding (PCA/UMAP/t-SNE), colored by class.
+    """Interactive 2-D scatter of the top-2 log-ratio components, colored by class.
 
-    ``axis_labels`` names the two axes when they are meaningful (PCA); UMAP/t-SNE
-    axes are left unnamed because they are not interpretable.
+    ``axis_labels`` names the two axes with their part-balance interpretation.
     """
     fig = go.Figure()
     urls = _recipe_urls(df)
-    has_links = "link" in df.columns
+    has_links = "url" in df.columns
 
     for fam in pd.unique(df["tag_coarse"]):
         m = df["tag_coarse"].to_numpy() == fam
@@ -401,27 +404,26 @@ def embedding_2d(
     xlabel = axis_labels[0] if axis_labels else ""
     ylabel = axis_labels[1] if axis_labels else ""
     fig.update_layout(
-        title=f"{method.upper()} embedding (2-D), colored by class",
+        title="Log-ratio PCA (2-D), colored by class",
         xaxis=dict(showticklabels=False, title=xlabel),
         yaxis=dict(showticklabels=False, title=ylabel),
         legend=dict(x=0.02, y=0.98),
         margin=dict(l=20, r=20, t=40, b=20),
     )
-    _write_html(fig, os.path.join(outdir, f"{method}_2d.html"), has_links)
+    _write_html(fig, os.path.join(outdir, "pca_2d.html"), has_links)
 
 
-def embedding_3d(
+def pca_scatter_3d(
     outdir: str,
-    method: str,
     coords: np.ndarray,
     df: pd.DataFrame,
     archetype_coords: np.ndarray,
     archetype_names: np.ndarray,
 ) -> None:
-    """Interactive 3-D scatter of an embedding (UMAP), colored by family."""
+    """Interactive 3-D scatter of the top-3 log-ratio components, colored by class."""
     fig = go.Figure()
     urls = _recipe_urls(df)
-    has_links = "link" in df.columns
+    has_links = "url" in df.columns
 
     for fam in pd.unique(df["tag_coarse"]):
         m = df["tag_coarse"].to_numpy() == fam
@@ -455,7 +457,7 @@ def embedding_3d(
         )
 
     fig.update_layout(
-        title=f"{method.upper()} embedding (3-D), colored by class",
+        title="Log-ratio PCA (3-D), colored by class",
         scene=dict(
             xaxis=dict(showticklabels=False, title=""),
             yaxis=dict(showticklabels=False, title=""),
@@ -465,7 +467,7 @@ def embedding_3d(
         legend=dict(x=0.02, y=0.98),
         margin=dict(l=0, r=0, t=40, b=0),
     )
-    _write_html(fig, os.path.join(outdir, f"{method}_3d.html"), has_links)
+    _write_html(fig, os.path.join(outdir, "pca_3d.html"), has_links)
 
 
 def tag_confusion(outdir: str, table: pd.DataFrame) -> None:

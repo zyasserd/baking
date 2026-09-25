@@ -2,7 +2,7 @@
 
 import pytest
 
-from src import units
+from src.preprocess import units
 
 
 def test_half_cup():

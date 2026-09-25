@@ -2,7 +2,7 @@
 
 import pytest
 
-from src import density
+from src.preprocess import density
 
 
 def test_weight_units_direct():

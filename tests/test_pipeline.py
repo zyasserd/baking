@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from src import preprocess
+from src.analysis import coda as preprocess
 
 
 def test_closure_pound_cake_four_equal():

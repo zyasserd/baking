@@ -2,7 +2,7 @@
 
 import pytest
 
-from src import significance
+from src.preprocess import significance
 
 
 def test_share_and_absolute_floor():

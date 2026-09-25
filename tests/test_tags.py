@@ -1,6 +1,8 @@
 """Tests for the Food.com tag taxonomy (``src.tags``)."""
 
-from src import tags
+import config
+
+from src.preprocess import tags
 
 
 def test_leaf_tag_resolves_to_class():
@@ -51,6 +53,6 @@ def test_pastry_title_rescue_keywords():
 
 
 def test_primary_classes_count():
-    assert len(tags.PRIMARY_CLASSES) == 7
-    assert "dessert_other" not in tags.PRIMARY_CLASSES
-    assert {"pie_pastry", "brownies"} <= set(tags.PRIMARY_CLASSES)
+    assert len(config.PRIMARY_CLASSES) == 7
+    assert "dessert_other" not in config.PRIMARY_CLASSES
+    assert {"pie_pastry", "brownies"} <= set(config.PRIMARY_CLASSES)

@@ -1,6 +1,6 @@
 """Tests for the from-scratch / baked-goods filters (``src.filters``)."""
 
-from src import filters
+from src.preprocess import filters
 
 
 def test_from_scratch_kept():

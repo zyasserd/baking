@@ -2,48 +2,52 @@
 
 import pytest
 
-from src import ingredients
+from src.preprocess import ingredients
 
 
 def test_flour_variants():
-    assert ingredients.classify("all-purpose flour") == "flour"
-    assert ingredients.classify("cake flour") == "flour"
-    assert ingredients.classify("whole wheat flour") == "flour"
-    assert ingredients.classify("self-rising flour") == "flour"
+    assert ingredients.primary_part(ingredients.resolve("all-purpose flour")[0]) == "flour"
+    assert ingredients.primary_part(ingredients.resolve("cake flour")[0]) == "flour"
+    assert ingredients.primary_part(ingredients.resolve("whole wheat flour")[0]) == "flour"
+    assert ingredients.primary_part(ingredients.resolve("self-rising flour")[0]) == "flour"
 
 
 def test_cornmeal_is_flour():
-    assert ingredients.classify("cornmeal") == "flour"
-    assert ingredients.classify("corn meal") == "flour"
-    assert ingredients.classify("masa harina") == "flour"
-    assert ingredients.classify("polenta") == "flour"
+    assert ingredients.primary_part(ingredients.resolve("cornmeal")[0]) == "flour"
+    assert ingredients.primary_part(ingredients.resolve("corn meal")[0]) == "flour"
+    assert ingredients.primary_part(ingredients.resolve("masa harina")[0]) == "flour"
+    assert ingredients.primary_part(ingredients.resolve("polenta")[0]) == "flour"
     # cornstarch is nearly pure starch -> flour part (USDA reference)
-    assert ingredients.classify("cornstarch") == "flour"
+    assert ingredients.primary_part(ingredients.resolve("cornstarch")[0]) == "flour"
 
 
 def test_fat_variants():
-    assert ingredients.classify("unsalted butter") == "fat"
-    assert ingredients.classify("butter") == "fat"
-    assert ingredients.classify("margarine") == "fat"
-    assert ingredients.classify("vegetable oil") == "fat"
+    assert ingredients.primary_part(ingredients.resolve("unsalted butter")[0]) == "fat"
+    assert ingredients.primary_part(ingredients.resolve("butter")[0]) == "fat"
+    assert ingredients.primary_part(ingredients.resolve("margarine")[0]) == "fat"
+    assert ingredients.primary_part(ingredients.resolve("vegetable oil")[0]) == "fat"
 
 
 def test_buttermilk_is_milk_not_butter():
-    assert ingredients.classify("buttermilk") == "milk"
-    assert ingredients.classify("milk") == "milk"
+    assert ingredients.primary_part(ingredients.resolve("buttermilk")[0]) == "milk"
+    assert ingredients.primary_part(ingredients.resolve("milk")[0]) == "milk"
 
 
-def test_peanut_butter_decomposes_to_fat():
-    vec = ingredients.decompose("peanut butter")
+def test_peanut_butter_resolves_to_fat():
+    vec, role = ingredients.resolve("peanut butter")
+    assert role == "addin"
     assert vec["fat"] == pytest.approx(0.50)
     assert vec["sugar"] == pytest.approx(0.10)
+    assert ingredients.decompose("peanut butter") == {}
 
 
-def test_milk_chocolate_decomposes_to_sugar_and_fat():
-    vec = ingredients.decompose("milk chocolate")
+def test_milk_chocolate_resolves_to_sugar_and_fat():
+    vec, role = ingredients.resolve("milk chocolate")
+    assert role == "addin"
     assert vec["sugar"] == pytest.approx(0.55)
     assert vec["fat"] == pytest.approx(0.30)
     assert "milk" not in vec
+    assert ingredients.decompose("milk chocolate") == {}
 
 
 def test_cream_cheese_decomposes_to_fat_and_liquid():
@@ -60,62 +64,62 @@ def test_condensed_milk_decomposes_to_sugar():
 
 
 def test_leaveners():
-    assert ingredients.classify("baking powder") == "leavener"
-    assert ingredients.classify("baking soda") == "leavener"
+    assert ingredients.primary_part(ingredients.resolve("baking powder")[0]) == "leavener"
+    assert ingredients.primary_part(ingredients.resolve("baking soda")[0]) == "leavener"
 
 
 def test_sugars():
-    assert ingredients.classify("brown sugar") == "sugar"
-    assert ingredients.classify("powdered sugar") == "sugar"
-    assert ingredients.classify("sugar") == "sugar"
+    assert ingredients.primary_part(ingredients.resolve("brown sugar")[0]) == "sugar"
+    assert ingredients.primary_part(ingredients.resolve("powdered sugar")[0]) == "sugar"
+    assert ingredients.primary_part(ingredients.resolve("sugar")[0]) == "sugar"
 
 
 def test_eggs():
-    assert ingredients.classify("egg") == "egg"
-    assert ingredients.classify("eggs") == "egg"
-    assert ingredients.classify("egg whites") == "egg"
+    assert ingredients.primary_part(ingredients.resolve("egg")[0]) == "egg"
+    assert ingredients.primary_part(ingredients.resolve("eggs")[0]) == "egg"
+    assert ingredients.primary_part(ingredients.resolve("egg whites")[0]) == "egg"
 
 
 def test_or_resolution():
-    assert ingredients.classify("butter or margarine") == "fat"
+    assert ingredients.primary_part(ingredients.resolve("butter or margarine")[0]) == "fat"
 
 
-def test_produce_decomposes_to_water():
-    vec = ingredients.decompose("bananas")
+def test_produce_resolves_to_water():
+    vec, _ = ingredients.resolve("bananas")
     assert vec["water"] > 0.5
-    vec = ingredients.decompose("canned pumpkin")
+    vec, _ = ingredients.resolve("canned pumpkin")
     assert vec["water"] == pytest.approx(0.90, abs=1e-2)
 
 
 def test_other():
-    assert ingredients.classify("vanilla extract") == "other"
-    assert ingredients.classify("") == "other"
+    assert ingredients.primary_part(ingredients.resolve("vanilla extract")[0]) == "other"
+    assert ingredients.primary_part(ingredients.resolve("")[0]) == "other"
 
 
 def test_nuts_decompose_to_fat():
-    # USDA: pecans are ~74% fat (add-in, zeroed in structural mode)
-    assert ingredients.classify("pecans") == "fat"
-    assert ingredients.role("pecans") == "addin"
-    assert ingredients.decompose("pecans", "structural") == {}
+    # USDA: pecans are ~74% fat (add-in, zeroed in the structural decomposition)
+    assert ingredients.primary_part(ingredients.resolve("pecans")[0]) == "fat"
+    assert ingredients.resolve("pecans")[1] == "addin"
+    assert ingredients.decompose("pecans") == {}
 
 
-def test_structural_mode_zeroes_addins():
-    assert ingredients.decompose("chocolate chips", "structural") == {}
-    assert ingredients.decompose("chocolate chips", "full")["sugar"] > 0
-    # base ingredients survive both modes
-    assert ingredients.decompose("butter", "structural") == {"fat": 1.0}
+def test_structural_decomposition_zeroes_addins():
+    assert ingredients.decompose("chocolate chips") == {}
+    assert ingredients.resolve("chocolate chips")[0]["sugar"] > 0
+    # base ingredients are unchanged
+    assert ingredients.decompose("butter") == {"fat": 1.0}
 
 
 def test_yeast_and_salt_and_water():
-    assert ingredients.classify("instant yeast") == "yeast"
-    assert ingredients.classify("salt") == "salt"
-    assert ingredients.classify("water") == "water"
+    assert ingredients.primary_part(ingredients.resolve("instant yeast")[0]) == "yeast"
+    assert ingredients.primary_part(ingredients.resolve("salt")[0]) == "salt"
+    assert ingredients.primary_part(ingredients.resolve("water")[0]) == "water"
 
 
 def test_weights_sum_to_at_most_one():
     for name in ["cream cheese", "sweetened condensed milk", "chocolate chips",
                  "butter", "flour", "honey", "tomato soup", "banana"]:
-        vec = ingredients.decompose(name)
+        vec, _ = ingredients.resolve(name)
         assert sum(vec.values()) <= 1.0 + 1e-9, name
 
 def test_bare_cream_resolves_as_heavy_cream():

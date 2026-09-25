@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import re
 
+import config
+
 _NUMBER = r"(?:\d+\s+\d+\s*/\s*\d+|\d+\s*/\s*\d+|\d+\.\d+|\d+)"
 
 _UNIT = (
@@ -119,13 +121,8 @@ def _canon(unit: str | None) -> str | None:
 # token maps to a standard cooking fraction *and* is followed by an imperial
 # volume unit (or pound). Weight units (oz/g/ml) are left alone because whole
 # amounts like "12 oz" and "16 oz" are real and common there.
-_FRACTION_MANGLE: dict[str, tuple[int, int]] = {
-    "12": (1, 2), "13": (1, 3), "14": (1, 4), "18": (1, 8),
-    "23": (2, 3), "34": (3, 4), "38": (3, 8),
-    "58": (5, 8), "78": (7, 8), "116": (1, 16),
-}
-
-_RECONSTRUCT_UNITS = frozenset({"cup", "tbsp", "tsp", "pt", "qt", "gal", "lb"})
+_FRACTION_MANGLE = config.MANGLED_FRACTIONS
+_RECONSTRUCT_UNITS = frozenset(config.MANGLE_RECONSTRUCT_UNITS)
 
 # Quantity ranges: "2 -3 cups", "1 1/2 - 2 cups", "1 to 2 cups". The range's
 # second number and the unit would otherwise leak into the ingredient head.
@@ -138,7 +135,9 @@ _RANGE_RE = re.compile(
 
 def _unmangle(value: float) -> float | None:
     """Undo a mangled fraction ("12" -> 0.5, "34" -> 0.75) when plausible."""
-    if value != int(value) or not (10 <= value <= 999):
+    if value != int(value) or not (
+        config.MANGLE_PLAUSIBLE_MIN <= value <= config.MANGLE_PLAUSIBLE_MAX
+    ):
         return None
     frac = _FRACTION_MANGLE.get(str(int(value)))
     if frac is None:

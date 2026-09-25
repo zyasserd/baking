@@ -9,7 +9,10 @@ An ingredient line like ``"1/2 cup firmly packed brown sugar"`` or
 ``head`` is the canonical ingredient (prep adjectives stripped, compositional
 modifiers kept), ``props`` are the preparation descriptors, and ``note`` carries
 parenthetical size hints / qualifiers. Amount/unit parsing (fractions, mangled
-slashes, package sizes) is delegated to ``src.units``.
+slashes, package sizes) is delegated to ``src.preprocess.units``.
+
+The word tables and the section-header regex are parameters — see the PARSING
+section of ``config``.
 """
 
 from __future__ import annotations
@@ -17,22 +20,13 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+import config
+
 from . import units
 
-# Preparation/quantity descriptors stripped from the head (moved to ``props``).
-# Compositional modifiers ("brown", "powdered", "whole wheat", "unsweetened",
-# "self-rising", "skim", "heavy", "sour", …) are intentionally NOT listed here.
-_PREP_PROPS = frozenset({
-    "chopped", "minced", "diced", "sliced", "grated", "shredded", "crushed",
-    "melted", "softened", "beaten", "divided", "optional", "peeled", "drained",
-    "rinsed", "sifted", "packed", "halved", "quartered", "cubed", "julienned",
-    "mashed", "pureed", "ground", "finely", "roughly", "thinly", "coarsely",
-    "firmly", "lightly", "well", "seeded", "cored", "trimmed", "washed",
-    "toasted", "thawed", "cooked", "boneless", "skinless", "lean", "frozen",
-    "canned", "fresh", "dried", "extra", "virgin", "room", "temperature", "to",
-    "taste", "large", "medium", "small", "unseasoned", "seasoned", "prepared",
-    "smoked", "unsalted", "salted", "plain", "nonfat", "reduced", "low",
-})
+_PREP_PROPS = config.PARSE_PREP_PROPS
+_UNIT_WORDS = config.PARSE_UNIT_WORDS
+_NONBAKED_KINDS = config.PARSE_NONBAKED_KINDS
 
 _PAREN_RE = re.compile(r"\(([^)]*)\)")
 _WORD_RE = re.compile(r"[a-z0-9]+")
@@ -42,29 +36,10 @@ _WORD_RE = re.compile(r"[a-z0-9]+")
 # list ("Streusel Topping", "Cream Cheese Filling", "for the glaze:").
 _COMPONENT_RE = re.compile(
     r"^(?:for\s+(?:the|a)\s+)?(?:[a-z][a-z' ]{0,30}?\s+)?"
-    r"(?P<kind>toppings?|fillings?|streusel|crusts?|batters?|glazes?|icings?"
-    r"|frostings?|doughs?|mixtures?|layers?|coatings?|ganache|drizzles?|crumbs?)"
+    r"(?P<kind>" + config.PARSE_COMPONENT_KIND_RE + r")"
     r"\s*:?\s*$",
     re.IGNORECASE,
 )
-
-# Sections whose ingredients never bake into the crumb (they are spread on
-# after baking or are pure decorations): their mass must not be pooled into
-# the batter's ratio. Everything else (streusel, filling, crust, dough, …)
-# bakes with the recipe and stays pooled.
-_NONBAKED_KINDS = frozenset({
-    "glaze", "glazes", "icing", "icings", "frosting", "frostings",
-    "ganache", "drizzle", "drizzles", "coating", "coatings",
-})
-
-# Stray unit/measure words that leak into the name when the amount carries a
-# parenthetical size ("1 (8 oz.) pkg. cream cheese" -> head "cream cheese").
-_UNIT_WORDS = frozenset({
-    "pkg", "package", "packages", "packet", "packets", "can", "jar", "bottle",
-    "bottles", "box", "boxes", "bag", "bags", "container", "containers",
-    "stick", "sticks", "envelope", "envelopes", "dash", "pinch", "drop",
-    "drops", "slice", "slices", "piece", "pieces",
-})
 
 
 @dataclass
@@ -109,8 +84,8 @@ def _strip_props(name: str) -> tuple[str, list[str]]:
 def component_header(line: str) -> str | None:
     """Classify a quantity-less line as a recipe section header.
 
-    Returns ``"drop"`` for non-baked sections (frosting, glaze, icing, …),
-    ``"keep"`` for baked sections (streusel, filling, crust, batter, …), or
+    Returns ``"drop"`` for non-baked sections (frosting, glaze, icing, ...),
+    ``"keep"`` for baked sections (streusel, filling, crust, batter, ...), or
     ``None`` when the line is not a header. Headers in the corpus are Title
     Case, ALL CAPS, or prefixed ``"for the"``; a bare lowercase ingredient
     (``"tabasco sauce"``) is never mistaken for one.

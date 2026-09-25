@@ -5,17 +5,12 @@ structurally, OR if it is a functional ingredient that acts at tiny mass
 (leavener, salt, yeast). Trace flavorings (vanilla, spices) fall below the
 threshold and are ignored.
 
-The rule is a parameter: ``share_min`` (fraction of total recipe mass),
-``grams_min`` (absolute floor), and the functional whitelist are all tunable.
+The thresholds are parameters — see the SIGNIFICANCE section of ``config``.
 """
 
 from __future__ import annotations
 
-SHARE_MIN = 0.02
-GRAMS_MIN = 2.0
-
-# Parts that bypass the mass threshold (powerful at small amounts).
-FUNCTIONAL_PARTS = frozenset({"leavener", "salt", "yeast"})
+import config
 
 
 def qualifies(grams: float | None, total: float, functional: bool = False) -> bool:
@@ -28,4 +23,7 @@ def qualifies(grams: float | None, total: float, functional: bool = False) -> bo
         return True
     if grams is None or grams <= 0 or total <= 0:
         return False
-    return grams >= GRAMS_MIN and (grams / total) >= SHARE_MIN
+    return (
+        grams >= config.SIGNIFICANCE_GRAMS_MIN
+        and (grams / total) >= config.SIGNIFICANCE_SHARE_MIN
+    )
