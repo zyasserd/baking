@@ -2,9 +2,10 @@
   # Baking ratio analysis: do ingredient ratios predict the kind of baked good?
   #
   # Two stages (see README):
-  #   1. preprocess  scripts/1_preprocess.py — raw corpora -> preprocessed
-  #                  per-recipe dataset (simplex proportions + tag labels)
-  #   2. analysis    scripts/2_analyze.py    — PCA, clustering, figures, results
+#   1. preprocess  scripts/preprocess.py — raw corpora -> preprocessed
+#                  per-recipe dataset (simplex proportions + tag labels)
+#   2. analysis    scripts/analyze.py    — dataset -> PCA, clustering,
+#                  figures, validation diagnostics, results
   #
   # Every tunable parameter lives in config.py.
 
@@ -53,7 +54,7 @@
         #    where a USDA value exists. nix also unpacks the archive and keeps
         #    only the three tables the pipeline reads (fdc-tables below), which
         #    the shell links at data/raw/fdc; src/preprocess/fdc.py then just
-        #    compacts them into data/raw/fdc_srlegacy.csv.
+        #    compacts them into data/interim/fdc_srlegacy.csv.
         fdc-sr-legacy = pkgs.fetchurl {
           name = "sr_legacy.zip";
           url = "https://fdc.nal.usda.gov/fdc-datasets/FoodData_Central_sr_legacy_food_csv_2018-04.zip";

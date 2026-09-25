@@ -9,8 +9,10 @@ reference archetypes, never as labels.
 Analysis runs in Aitchison geometry (CLR/ILR — see ``src.analysis.coda``):
 log-ratio PCA, robust outlier elimination, clustering vs the tag classes
 (ARI + confusion), and the class distribution along PC1 (the "rich vs lean"
-continuum). Every parameter lives in ``config`` (ANALYSIS section); the entry
-point takes no tuning flags.
+continuum). Validation diagnostics (labels vs titles, estimated mass vs
+nutrition) are written alongside the results — see ``validate.write_reports``.
+Every parameter lives in ``config`` (ANALYSIS section); the entry point takes
+no tuning flags.
 """
 
 from __future__ import annotations

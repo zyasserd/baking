@@ -983,5 +983,5 @@ VALIDATION_TITLE_KEYWORDS: dict[str, tuple[str, ...]] = {
 # Correlations are reported per class; skip classes with fewer rows than this.
 VALIDATION_MIN_ROWS = 20
 
-# Number of random sample rows printed for eyeballing in validate_tags.
+# Number of random sample rows for eyeballing in src/analysis/validate.py.
 VALIDATION_SAMPLE_ROWS = 8

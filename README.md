@@ -20,15 +20,15 @@ baking is a continuum, and the tags are fuzzy labels on it.
 ```
 flake.nix                  dev env + dataset fetchers (pinned sha256, commented)
 config.py                  EVERY tunable parameter, in one commented file
-scripts/                    thin entry points (argparse + report printing
-                            only — all logic lives in src/)
-  preprocess.py             STAGE 1: raw corpora -> preprocessed dataset
-  analyze.py                STAGE 2: dataset -> all results (analysis +
-                            validation diagnostics under output/)
+scripts/                   thin entry points (argparse + report printing
+                           only — all logic lives in src/)
+  preprocess.py            STAGE 1: raw corpora -> preprocessed dataset
+  analyze.py               STAGE 2: dataset -> all results (analysis +
+                           validation diagnostics under output/)
 src/
-  preprocess/               stage-1 library
-    pipeline.py             the stage-1 pipeline (join -> parts -> dataset)
-    parse.py units.py       ingredient line -> qty/unit/head
+  preprocess/              stage-1 library
+    pipeline.py            the stage-1 pipeline (join -> parts -> dataset)
+    parse.py units.py      ingredient line -> qty/unit/head
     density.py             (qty, unit, ingredient) -> grams
     ingredients.py         head -> structural part weights (USDA)
     reference.py           USDA SR Legacy lookup + fuzzy matching
@@ -37,8 +37,8 @@ src/
     tags.py                Food.com tags -> class taxonomy
     significance.py        which ingredients count toward the ratio
     parts.py               grams -> 5-part simplex proportions
-  analysis/                 stage-2 library
-    pipeline.py             the stage-2 analysis (CLR -> PCA -> clustering)
+  analysis/                stage-2 library
+    pipeline.py            the stage-2 analysis (CLR -> PCA -> clustering)
     coda.py                load dataset, closure/CLR/ILR transforms
     pca.py                 log-ratio PCA
     folds.py               book archetypes, tetrahedron fold
@@ -50,7 +50,8 @@ data/
                            symlinks + the manual Kaggle download
   interim/                 derived stage-1 artifacts (gitignored):
                            fdc_srlegacy.csv, ingredients.csv
-  processed/recipes_simplex.csv   THE PREPROCESSED DATASET (committed)
+  processed/               THE PREPROCESSED DATASET (committed)
+    recipes_simplex.csv
 output/                    stage-2 results (gitignored)
 tests/                     pytest suite
 ```
@@ -137,11 +138,11 @@ because it is the project's main methodological decision:
   count (flours, sugars, fats, eggs, dairy, water, leaveners, salt, yeast),
   reproducing Ruhlman's clean ratio; the chocolate is flavor, not structure.
 
-Clustering the tag classes with each gives ARI 0.176 (structural) vs ≈ 0.16
-(full, at the last comparison) and better-separated archetypes — the
-add-in-excluding decomposition wins, so **structural is what the pipeline
-ships**. The full vector still exists internally (it picks each ingredient's
-primary part for the density lookup); it never reaches the dataset.
+Clustering the tag classes with each gives ARI 0.177 (structural, the shipped
+pipeline) vs ≈ 0.16 (full, at the last direct comparison) and better-separated
+archetypes — the add-in-excluding decomposition wins, so **structural is what
+the pipeline ships**. The full vector still exists internally (it picks each
+ingredient's primary part for the density lookup); it never reaches the dataset.
 
 ## Reading the results
 
@@ -157,10 +158,13 @@ primary part for the density lookup); it never reaches the dataset.
   `config.TETRAHEDRON_PARTS` for the empirical comparison).
 - Clustering runs in the **top-3 log-ratio PCs** (not 2): 3D beats 2D and PC4
   only adds noise.
+- `compositions.csv` — one row per recipe: the 5-part proportions plus its
+  nearest book archetype and Aitchison distance to it (and the recipe `url`).
 - `tag_confusion.png` and `cluster_report.txt` — the classes bleed into each
   other (ARI ≈ 0.18, silhouette ≈ 0): baking is a continuum, and the Food.com
   tags are fuzzy labels on it, not crisp ratio clusters.
-- `tag_validation.txt` — title-agreement spot check per class.
+- `tag_validation.txt` — title-agreement spot check per class, written
+  automatically by stage 2 (`src/analysis/validate.py`).
 - `nutrition_validation.csv` — estimated structural grams vs Food.com nutrition
   (independent per-serving data) correlations, per class.
 
