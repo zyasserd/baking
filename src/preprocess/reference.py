@@ -3,8 +3,8 @@
 This module is the *reference* behind ``src.preprocess.ingredients``: instead of
 hand-tuned numbers, an ingredient's weight vector into the baking parts comes
 from USDA's proximate composition (per 100 g). ``src/preprocess/fdc.py`` builds
-the backing CSV (``config.FDC_REFERENCE_CSV``) from the flake-fetched SR Legacy
-archive; this module loads it, maps a cleaned ingredient head to a food, and
+the backing CSV (``config.FDC_REFERENCE_CSV``) from the flake-staged SR Legacy
+tables; this module loads it, maps a cleaned ingredient head to a food, and
 converts its nutrients to a part vector.
 
 Nutrient -> part transform (documented, tunable — see config FDC section):

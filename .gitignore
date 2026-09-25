@@ -14,12 +14,11 @@ result-*
 .vscode/
 .idea/
 
-# Raw data — nix-fetched (pinned in flake.nix) or manually downloaded
-# (RAW_recipes.csv from Kaggle; sha256 pinned in config.py).
+# Raw data — store symlinks staged by the flake shellHook (datasets pinned in
+# flake.nix) and the manual Kaggle download (RAW_recipes.csv, sha256 pinned
+# there too).
 data/raw
 
-# Derived USDA reference (built by src/preprocess/fdc.py from the fetched zip)
-data/reference/
-
-# Interim per-ingredient database (provenance artifact of stage 1)
+# Derived stage-1 artifacts: the compact USDA reference CSV and the
+# per-ingredient database.
 data/interim/

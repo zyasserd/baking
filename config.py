@@ -2,10 +2,10 @@
 
 The pipeline has two stages (see README):
 
-1. **preprocess** (`scripts/1_preprocess.py`): raw corpora -> a per-recipe
+1. **preprocess** (`scripts/preprocess.py`): raw corpora -> a per-recipe
    dataset of structural part grams + simplex proportions (summing to 1) and
    independent Food.com tag labels.
-2. **analysis** (`scripts/2_analyze.py`): that dataset -> PCA, clustering,
+2. **analysis** (`scripts/analyze.py`): that dataset -> PCA, clustering,
    figures, results.
 
 Everything a curious reader might want to re-tune lives here: the taxonomy, the
@@ -24,34 +24,35 @@ from __future__ import annotations
 # DATA — locations, provenance, content pins.  [DATA]
 # ══════════════════════════════════════════════════════════════════════════════
 #
-# All raw datasets are fetched (or pinned) in flake.nix with sha256 hashes:
+# All raw datasets are pinned in flake.nix and staged as store symlinks by the
+# dev shell (shellHook) at the locations below:
 #
 # - RecipeNLG (Bien et al. 2020, 2.3 M recipe NER+text corpus):
 #   official site https://recipenlg.cs.put.poznan.pl/dataset requires a
 #   registration form; the flake fetches a byte-identical public mirror
 #   (Hugging Face `innovate-data/RecipeNLG`, sha256 verified against the local
-#   copy) and stores it at RAW_RECIPE_NLG_CSV.
+#   copy) and links it at RAW_RECIPE_NLG_CSV.
+#
+# - USDA FoodData Central, SR Legacy (2018-04, the final Standard Reference
+#   release): fetched AND unzipped by the flake; the unpacked tables the
+#   pipeline reads are linked at FDC_TABLES_DIR, and the compact per-food CSV
+#   used as reference is derived from them by `src/preprocess/fdc.py`
+#   (no network, no extraction).
 #
 # - Food.com corpus (shuyangli94 on Kaggle): provides the independent *labels*
 #   (tag classes) and per-recipe nutrition. Kaggle requires login, so it cannot
-#   be auto-fetched; download RAW_recipes.csv manually from
+#   be fetched by nix; download RAW_recipes.csv manually from
 #   https://www.kaggle.com/datasets/shuyangli94/food-com-recipes-and-user-interactions
-#   into data/raw/food/. The exact file is pinned by the sha256 below, verified
-#   by scripts/1_preprocess.py on every run.
-#
-# - USDA FoodData Central, SR Legacy (2018-04, the final Standard Reference
-#   release): fetched by the flake; the compact per-food CSV used as reference
-#   is derived from it by `src/preprocess/fdc.py` (no network).
+#   into data/raw/food/. The exact file is pinned by the sha256 in flake.nix,
+#   validated by the dev shell on every entry (not by this pipeline).
 
 RAW_RECIPE_NLG_CSV = "data/raw/RecipeNLG/RecipeNLG_dataset.csv"
 RAW_FOOD_RECIPES_CSV = "data/raw/food/RAW_recipes.csv"
 
-# sha256 of the manually-downloaded RAW_recipes.csv (pinned content).
-RAW_FOOD_RECIPES_SHA256 = "6a8136d1da9e03396a9f52d72200b3fddb8fe103f11e1496effca30ac4e0539f"
-
-# Derived USDA reference (built by src/preprocess/fdc.py from the flake-fetched zip).
-FDC_ZIP = "data/reference/sr_legacy.zip"
-FDC_REFERENCE_CSV = "data/reference/fdc_srlegacy.csv"
+# Unpacked SR Legacy tables (food.csv, food_category.csv, food_nutrient.csv),
+# linked by flake.nix; see src/preprocess/fdc.py.
+FDC_TABLES_DIR = "data/raw/fdc"
+FDC_REFERENCE_CSV = "data/interim/fdc_srlegacy.csv"
 
 # FDC nutrient ids -> SR Legacy column names (per 100 g).
 FDC_NUTRIENT_IDS = {
@@ -960,7 +961,7 @@ DROP_WEAK_TIER = True
 MIN_TAG_CONFIDENCE: str | None = None
 
 # ══════════════════════════════════════════════════════════════════════════════
-# VALIDATION — diagnostic tables for scripts/validate_*.py.  [STAGE 2]
+# VALIDATION — diagnostic tables written by stage 2 (src/analysis/validate.py).
 # ══════════════════════════════════════════════════════════════════════════════
 
 # Title keywords used to spot-check tag correctness per class (independent of

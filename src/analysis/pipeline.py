@@ -1,4 +1,4 @@
-"""STAGE 2 — Analysis: the preprocessed dataset -> results.
+"""STAGE 2 — Analysis pipeline: the preprocessed dataset -> results.
 
 The input is ``data/processed/recipes_simplex.csv`` (written by stage 1): one
 row per recipe with structural part grams and 5-part simplex proportions
@@ -9,17 +9,13 @@ reference archetypes, never as labels.
 Analysis runs in Aitchison geometry (CLR/ILR — see ``src.analysis.coda``):
 log-ratio PCA, robust outlier elimination, clustering vs the tag classes
 (ARI + confusion), and the class distribution along PC1 (the "rich vs lean"
-continuum). Every parameter lives in ``config`` (ANALYSIS section); this script
-takes no tuning flags.
+continuum). Every parameter lives in ``config`` (ANALYSIS section); the entry
+point takes no tuning flags.
 """
 
 from __future__ import annotations
 
-import argparse
 import os
-import sys
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
 import pandas as pd
@@ -27,11 +23,11 @@ from sklearn.metrics import silhouette_score
 
 import config
 
-from src.analysis import coda, cluster, folds, pca, visualize
-from src.preprocess import parts
+from ..preprocess import parts
+from . import coda, cluster, folds, pca, validate, visualize
 
 
-def _analyze(df: pd.DataFrame, outdir: str) -> dict:
+def analyze(df: pd.DataFrame, outdir: str) -> dict:
     # Recipes -> simplex proportions (already closed by stage 1) -> log ratios.
     P = df[parts.proportion_columns()].to_numpy(dtype=float)
     P = coda.multiplicative_replacement(coda.closure(P))
@@ -127,13 +123,13 @@ def _analyze(df: pd.DataFrame, outdir: str) -> dict:
     return metrics
 
 
-def _report(df: pd.DataFrame, outdir: str) -> dict:
+def report(df: pd.DataFrame, outdir: str) -> dict:
     print(f"\n===== structural simplex ({len(df)} recipes) =====")
     print("Class distribution:")
     for name, count in df["tag_coarse"].value_counts().items():
         print(f"  {name:<12} {count}")
 
-    metrics = _analyze(df, outdir)
+    metrics = analyze(df, outdir)
     print("\nClass ordering along PC1 (rich vs lean):")
     for name in metrics["pc1_order"]:
         print(f"  {name}")
@@ -142,17 +138,15 @@ def _report(df: pd.DataFrame, outdir: str) -> dict:
     return metrics
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Stage 2: analyze the preprocessed dataset.")
-    parser.add_argument("--input", default=config.PROCESSED_RECIPES_CSV, help="Preprocessed dataset path")
-    parser.add_argument("--outdir", default=config.OUTPUT_DIR, help="Directory for output files")
-    args = parser.parse_args()
+def run(input_csv: str, outdir: str) -> dict:
+    os.makedirs(outdir, exist_ok=True)
 
-    os.makedirs(args.outdir, exist_ok=True)
-
-    df, excluded = coda.load_recipes(args.input)
-    excluded.to_csv(os.path.join(args.outdir, "excluded_flourless.csv"), index=False)
+    df, excluded = coda.load_recipes(input_csv)
+    excluded.to_csv(os.path.join(outdir, "excluded_flourless.csv"), index=False)
     print(f"Loaded {len(df)} recipes ({len(excluded)} flourless rows excluded).")
+
+    # Diagnostics on the full dataset, before any filtering (see validate.py).
+    validate.write_reports(df, outdir)
 
     if config.DROP_WEAK_TIER:
         dropped = (df["tag_coarse"] == "dessert_other").sum()
@@ -165,9 +159,6 @@ def main() -> None:
         print(f"Dropped {int((~keep).sum())} recipes below confidence {config.MIN_TAG_CONFIDENCE}.")
         df = df[keep].reset_index(drop=True)
 
-    _report(df, args.outdir)
-    print(f"\nOutputs written under {args.outdir}/")
-
-
-if __name__ == "__main__":
-    main()
+    metrics = report(df, outdir)
+    print(f"\nOutputs written under {outdir}/")
+    return metrics

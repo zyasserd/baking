@@ -1,4 +1,4 @@
-"""STAGE 1 — Preprocess: raw corpora -> the preprocessed recipe dataset.
+"""STAGE 1 — Preprocess pipeline: raw corpora -> the preprocessed recipe dataset.
 
 Joins the RecipeNLG corpus (ingredient text) with the Food.com corpus
 (independent tag labels + nutrition) on the numeric Food.com recipe id at the
@@ -30,35 +30,22 @@ Outputs (see config DATA section):
   Food.com nutrition.
 
 The Food.com file must be downloaded manually (Kaggle login; see flake.nix) —
-its sha256 is pinned in ``config.RAW_RECIPES_SHA256`` and verified here.
+its sha256 is pinned there and validated by the dev shell on entry.
 """
 
 from __future__ import annotations
 
-import argparse
 import ast
 import csv
-import hashlib
 import os
 import re
-import sys
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pandas as pd
 
 import config
 
-from src.preprocess import (
-    density,
-    filters,
-    fdc as fdc_module,
-    ingredients,
-    parse,
-    parts,
-    significance,
-    tags,
-)
+from . import density, filters, ingredients, parse, parts, significance, tags
+from . import fdc as fdc_module
 
 _FOOD_ID_RE = re.compile(r"food\.com/recipe/.*?(\d+)\s*$")
 
@@ -104,26 +91,6 @@ def _literal_list(value: str) -> list[str] | None:
     if isinstance(parsed, str):
         return [parsed]
     return None
-
-
-def verify_food_dataset(path: str = config.RAW_FOOD_RECIPES_CSV) -> None:
-    """Verify the pinned sha256 of the manually-downloaded RAW_recipes.csv."""
-    if not os.path.exists(path):
-        raise SystemExit(
-            f"missing {path}\n"
-            "download RAW_recipes.csv (login required) from\n"
-            "  https://www.kaggle.com/datasets/shuyangli94/food-com-recipes-and-user-interactions\n"
-            "into data/raw/food/ — the expected sha256 is pinned in config.RAW_FOOD_RECIPES_SHA256"
-        )
-    h = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for chunk in iter(lambda: fh.read(1 << 20), b""):
-            h.update(chunk)
-    if h.hexdigest() != config.RAW_FOOD_RECIPES_SHA256:
-        raise SystemExit(
-            f"{path} does not match the pinned sha256 {config.RAW_FOOD_RECIPES_SHA256}\n"
-            "make sure the file is the original RAW_recipes.csv from the Kaggle dataset"
-        )
 
 
 def analyze_ingredients(ing_list: list[str]) -> tuple[list[dict], dict, int, float, bool]:
@@ -260,9 +227,15 @@ def build(
     interim_path: str,
     limit: int | None = None,
 ) -> dict:
-    verify_food_dataset(food_path)
+    if not os.path.exists(food_path):
+        raise SystemExit(
+            f"missing {food_path}\n"
+            "download RAW_recipes.csv (login required) from\n"
+            "  https://www.kaggle.com/datasets/shuyangli94/food-com-recipes-and-user-interactions\n"
+            "into data/raw/food/ — the dev shell validates its pinned sha256 (flake.nix)"
+        )
 
-    # The USDA reference is derived from the flake-fetched archive; build it
+    # The USDA reference is derived from the flake-staged tables; build it
     # once here so stage 1 is self-sufficient.
     if not os.path.exists(config.FDC_REFERENCE_CSV):
         fdc_module.build()
@@ -379,28 +352,3 @@ def build(
     interim_df.to_csv(interim_path, index=False)
 
     return stats
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Stage 1: build the preprocessed recipe dataset.")
-    parser.add_argument("--rnlg", default=config.RAW_RECIPE_NLG_CSV, help="RecipeNLG_dataset.csv path")
-    parser.add_argument("--food", default=config.RAW_FOOD_RECIPES_CSV, help="Food.com RAW_recipes.csv path")
-    parser.add_argument("--out", default=config.PROCESSED_RECIPES_CSV, help="Output dataset path")
-    parser.add_argument("--interim", default=config.INTERIM_INGREDIENTS_CSV, help="Per-ingredient database path")
-    parser.add_argument("--limit", type=int, default=None, help="Only read this many RecipeNLG rows")
-    args = parser.parse_args()
-
-    stats = build(args.rnlg, args.food, args.out, args.interim, args.limit)
-    print(f"RecipeNLG rows read:   {stats['total']}")
-    print(f"food.com rows:         {stats['food_rows']}")
-    print(f"joined to Food.com:    {stats['joined']}")
-    print(f"excluded (not scratch):{stats['excluded']}")
-    print(f"flourless dropped:     {stats['flourless']}")
-    print(f"kept (labeled):        {stats['kept']}")
-    print(f"non-baked sections:    {stats['nonbaked_components']} recipes had frosting/glaze dropped")
-    print(f"wrote {args.out}")
-    print(f"wrote {args.interim}")
-
-
-if __name__ == "__main__":
-    main()

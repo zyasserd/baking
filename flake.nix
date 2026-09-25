@@ -50,53 +50,83 @@
         #    Reference release; ~7,800 foods with full proximate composition).
         #    This is the *reference* behind the ingredient decomposition
         #    (src/preprocess/reference.py) — hand-tuned numbers are never used
-        #    where a USDA value exists. The zip is unpacked and compacted into
-        #    data/reference/fdc_srlegacy.csv by src/preprocess/fdc.py.
+        #    where a USDA value exists. nix also unpacks the archive and keeps
+        #    only the three tables the pipeline reads (fdc-tables below), which
+        #    the shell links at data/raw/fdc; src/preprocess/fdc.py then just
+        #    compacts them into data/raw/fdc_srlegacy.csv.
         fdc-sr-legacy = pkgs.fetchurl {
           name = "sr_legacy.zip";
           url = "https://fdc.nal.usda.gov/fdc-datasets/FoodData_Central_sr_legacy_food_csv_2018-04.zip";
           hash = "sha256-uAgXKUuIUFMKrt8uUVwCWTsYJPdjoP81blwggWQ+b9A=";
         };
 
+        # The archive holds one top-level directory with 20 tables and docs;
+        # only food.csv, food_category.csv and food_nutrient.csv matter for the
+        # decomposition. Unpacking is a cached nix derivation, not pipeline
+        # code — fdc-tables is a flat directory of those three CSVs.
+        fdc-tables = pkgs.runCommand "fdc-sr-legacy-tables"
+          { nativeBuildInputs = [ pkgs.unzip ]; } ''
+          mkdir -p $out
+          unzip -j -q ${fdc-sr-legacy} \
+            'FoodData_Central_sr_legacy_food_csv_2018-04/food.csv' \
+            'FoodData_Central_sr_legacy_food_csv_2018-04/food_category.csv' \
+            'FoodData_Central_sr_legacy_food_csv_2018-04/food_nutrient.csv' \
+            -d $out
+        '';
+
         # 3. Food.com corpus (shuyangli94, 2019): tags (the independent class
         #    labels) and per-recipe nutrition. Kaggle requires a login, so this
-        #    dataset CANNOT be auto-fetched: download RAW_recipes.csv manually
+        #    dataset CANNOT be fetched by nix: download RAW_recipes.csv manually
         #    from
         #
         #      https://www.kaggle.com/datasets/shuyangli94/food-com-recipes-and-user-interactions
         #
-        #    into data/raw/food/RAW_recipes.csv. The file's sha256 is pinned in
-        #    config.py (RAW_FOOD_RECIPES_SHA256) and verified by
-        #    scripts/1_preprocess.py on every run, so a wrong/drifted file fails
-        #    loudly instead of silently changing the labels.
-        food-recipes-sha256 = "sha256-aoE20dqeAzlqn1LXIgCz/duP4QPxHhSW7/yjCsTgU58=";
+        #    into data/raw/food/RAW_recipes.csv. The dev shell validates the
+        #    file against the pinned sha256 below on every entry (nix checks,
+        #    not the pipeline), so a wrong/drifted file fails loudly instead of
+        #    silently changing the labels.
+        food-recipes-sha256 = "6a8136d1da9e03396a9f52d72200b3fddb8fe103f11e1496effca30ac4e0539f";
       in
       {
         # Manual fetch targets (optional): `nix build .#recipe-nlg` etc.
         packages.recipe-nlg = recipe-nlg;
         packages.fdc-sr-legacy = fdc-sr-legacy;
+        packages.fdc-tables = fdc-tables;
 
         devShells.default = pkgs.mkShell {
           packages = [ pythonEnv ];
+
           shellHook = ''
             echo "baking-ratios dev shell — Python ${python.version}"
 
-            # Stage the nix-fetched datasets into their config.py locations.
-            # Skipped when the files already exist (manual copies stay put;
-            # building here is what downloads, on demand and once).
+            # Add a store symlink at each dataset's config.py location — but
+            # only when it is missing, so existing local copies (like the
+            # official RecipeNLG distribution) are left alone and nothing is
+            # fetched until it is actually needed.
             if [ ! -e data/raw/RecipeNLG/RecipeNLG_dataset.csv ]; then
               mkdir -p data/raw/RecipeNLG
               nix build ".#recipe-nlg" -o data/raw/RecipeNLG/RecipeNLG_dataset.csv
             fi
-            if [ ! -e data/reference/sr_legacy.zip ]; then
-              mkdir -p data/reference
-              nix build ".#fdc-sr-legacy" -o data/reference/sr_legacy.zip
+            if [ ! -e data/raw/fdc/food.csv ]; then
+              mkdir -p data/raw
+              nix build ".#fdc-tables" -o data/raw/fdc
             fi
-            if [ ! -e data/raw/food/RAW_recipes.csv ]; then
-              echo "NOTE: data/raw/food/RAW_recipes.csv is missing."
-              echo "  Download RAW_recipes.csv (login required) from"
-              echo "  https://www.kaggle.com/datasets/shuyangli94/food-com-recipes-and-user-interactions"
-              echo "  expected sha256: 6a8136d1da9e03396a9f52d72200b3fddb8fe103f11e1496effca30ac4e0539f"
+
+            # Food.com is login-gated (Kaggle), so nix cannot fetch it. The
+            # pinned hash above is the file's identity; validate here.
+            if [ -e data/raw/food/RAW_recipes.csv ]; then
+              actual=$(sha256sum data/raw/food/RAW_recipes.csv | cut -d' ' -f1)
+              if [ "$actual" != "${food-recipes-sha256}" ]; then
+                echo "ERROR: data/raw/food/RAW_recipes.csv does not match the pinned sha256"
+                echo "  expected: ${food-recipes-sha256}"
+                echo "  actual:   $actual"
+                echo "  make sure the file is the original RAW_recipes.csv from the Kaggle dataset"
+                exit 1
+              fi
+            else
+              echo "  Food.com:   data/raw/food/RAW_recipes.csv is MISSING — download it (login) from"
+              echo "              https://www.kaggle.com/datasets/shuyangli94/food-com-recipes-and-user-interactions"
+              echo "              expected sha256: ${food-recipes-sha256}"
             fi
           '';
         };
