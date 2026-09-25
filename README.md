@@ -19,17 +19,15 @@ hand-tuned guesses (see *Composition vectors* below).
 - The ratio simplex is genuinely 4-dimensional (PC1 ≈ 48% variance, PC2 21%,
   PC3 16%, PC4 15%) — baking is not a low-dimensional island structure.
 - **PC1 is the "rich vs lean" axis** (`+sugar +fat +egg −liquid −flour`) and it
-  orders the Food.com classes *exactly* as culinary intuition predicts — and the
-  ordering is identical whether add-ins are decomposed (`full`) or excluded
-  (`structural`):
+  orders the Food.com classes *exactly* as culinary intuition predicts:
 
   ```
   batter < bread < pie_pastry < quick_bread < cake < cookie < brownies
   ```
 
 - But every class has a large spread, so the classes **overlap heavily**:
-  clustering the ratios and scoring against the tags gives **ARI ≈ 0.16–0.18**
-  and a near-zero silhouette. Baking is a **continuum**, not a set of discrete
+  clustering the ratios and scoring against the tags gives **ARI ≈ 0.21** and a
+  near-zero silhouette. Baking is a **continuum**, not a set of discrete
   islands; the tags are fuzzy boundaries drawn on that continuum.
 - **The best 3D simplex view folds egg into liquid.** Of the ten possible
   4-part sub-compositions (one merged pair), clustering the tag classes in
@@ -38,13 +36,13 @@ hand-tuned guesses (see *Composition vectors* below).
   pairwise Aitchison distance 0.57). Egg alone is the *weakest* single part
   (class-separation F ≈ 590, vs ≈ 3100 for liquid and sugar) — its signal only
   appears when combined with liquid, which makes physical sense (an egg is ~75%
-  water). Clustering in the top-3 log-ratio PCs (ARI 0.19) beats 2D (0.15);
-  PC4 is noise.
-- **Full vs structural**: structural (add-ins excluded, the book's convention)
-  scores better than decomposing add-ins into the ratio — ARI 0.176 vs 0.163
-  (3-D clustering), silhouette −0.051 vs −0.044. Decomposing add-ins also
-  inflates the cookie class's spread (their chocolate/fruit sugar+fat varies
-  hugely). So Ruhlman's add-in exclusion holds up quantitatively.
+  water). Clustering in the top-3 log-ratio PCs beats 2D; PC4 is noise.
+- **Add-ins are excluded (the book's convention, chosen empirically).** The
+  build ships the *structural* decomposition — add-ins zeroed. The comparison
+  that chose it: structural ARI 0.207 vs 0.176 for pooling add-ins into the
+  ratio (3-D clustering). Pooling add-ins also inflates the cookie class's
+  spread (their chocolate/fruit sugar+fat varies hugely). So Ruhlman's add-in
+  exclusion holds up quantitatively.
 
 ## Data
 
@@ -139,8 +137,10 @@ fruit, vegetables, cheese, condiments, …). `decompose(name, mode)`:
 - `mode="full"` — every significant ingredient contributes its vector;
 - `mode="structural"` — add-ins are zeroed, leaving Ruhlman's clean ratio.
 
-`scripts/build_dataset.py` emits **both** gram sets (`*_g` and `*_s_g`) so
-`main.py --simplex full|structural|both` can compare them.
+`scripts/build_dataset.py` ships the **structural** grams (`*_g` columns): the
+add-in-excluding decomposition classifies measurably better (see *Result*), so
+it is the pipeline's composition. The full vector is still used internally to
+pick each ingredient's primary part for the density lookup.
 
 The nutrient→part mapping and the curated alias map are parameters.
 
@@ -225,14 +225,14 @@ is a parameter** — if a class proves unreliable, edit the table and re-run.
 
 1. **Reference** — `scripts/fetch_fdc.py` → `data/reference/fdc_srlegacy.csv`.
 2. **Build** — `scripts/build_dataset.py` joins RecipeNLG + Food.com, parses
-   grams, filters from-scratch, decomposes (full + structural) →
+   grams, filters from-scratch, decomposes (structural; add-ins zeroed) →
    `data/recipes_tagged.csv`.
 3. **Validate tags** — `scripts/validate_tags.py` cross-checks each class
    against title keywords, ingredient signals, and nutrition →
    `output/tag_validation.txt`.
 4. **Validate decomposition** — `scripts/validate_nutrition.py` correlates
    estimated `fat_g`/`sugar_g` against Food.com nutrition → `output/nutrition_validation.csv`.
-5. **Simplex + PCA + cluster + continuum** — `main.py --simplex full|structural|both`.
+5. **Simplex + PCA + cluster + continuum** — `main.py --cluster`.
 
 ## Setup
 
@@ -253,11 +253,8 @@ nix develop -c python scripts/build_dataset.py
 nix develop -c python scripts/validate_tags.py
 nix develop -c python scripts/validate_nutrition.py
 
-# 3. Run the analysis (full simplex, clustered)
+# 3. Run the analysis (clustered)
 nix develop -c python main.py --input data/recipes_tagged.csv --outdir output/ --cluster
-
-# Compare full vs structural decompositions
-nix develop -c python main.py --input data/recipes_tagged.csv --outdir output/ --cluster --simplex both
 
 # Optional embedding
 nix develop -c python main.py --input data/recipes_tagged.csv --outdir output/ --cluster --embed umap
@@ -273,12 +270,10 @@ nix develop -c pytest tests/
 
 | File | Contents |
 |---|---|
-| `data/recipes_tagged.csv` | joined, tagged recipes (`*_g` full + `*_s_g` structural) |
+| `data/recipes_tagged.csv` | joined, tagged recipes (structural `*_g` grams) |
 | `data/reference/fdc_srlegacy.csv` | USDA SR Legacy reference (per-100 g) |
 | `output/tag_validation.txt` / `.csv` | per-class tag-correctness report |
 | `output/nutrition_validation.csv` | decomposition vs nutrition correlations |
-| `output/simplex_comparison.csv` | full vs structural ARI/silhouette/PC1 |
-| `output/full/…`, `output/structural/…` | per-simplex results (when `--simplex both`) |
 | `output/compositions.csv` | per-recipe simplex proportions + labels + archetype distance |
 | `output/variance.csv` / `loadings.csv` / `scree.png` | log-ratio PCA dimensionality + part balances |
 | `output/pca_biplot.png` / `ternary.png` | static views (book archetypes as stars) |
@@ -297,12 +292,10 @@ nix develop -c pytest tests/
 - `simplex_3d.html` — the 3D tetrahedron `flour / liquid+egg / fat / sugar`; the
   egg-into-liquid fold separates the tag classes best of all ten merges (see
   *Result*).
-- Clustering runs in the **top-3 log-ratio PCs** (not 2): 3D beats 2D (ARI
-  0.19 vs 0.15) and PC4 only adds noise.
-- `simplex_comparison.csv` — full vs structural: structural (add-ins excluded)
-  edges out full, supporting Ruhlman's add-in exclusion.
+- Clustering runs in the **top-3 log-ratio PCs** (not 2): 3D beats 2D and PC4
+  only adds noise.
 - `tag_confusion.png` and `cluster_report.txt` — the classes bleed into each
-  other (ARI ≈ 0.16–0.18, silhouette ≈ 0): baking is a continuum, and the
+  other (ARI ≈ 0.21, silhouette ≈ 0): baking is a continuum, and the
   Food.com tags are fuzzy labels on it, not crisp ratio clusters.
 
 `tag_validation.txt` flags which classes are trustworthy: `bread` is the most

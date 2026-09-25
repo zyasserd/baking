@@ -61,6 +61,8 @@ _NAME_DENSITY: dict[str, float] = {
     "half and half": 242.0,
     "whipping cream": 238.0,
     "heavy cream": 238.0,
+    "whipped cream": 120.0,
+    "cream": 238.0,
     "coconut milk": 240.0,
     "honey": 340.0,
     "maple syrup": 315.0,

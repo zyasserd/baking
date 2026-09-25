@@ -55,6 +55,9 @@ _MULTI: list[tuple[tuple[str, ...], dict[str, float], str]] = [
     (("tomato", "soup"), {"water": 0.90, "sugar": 0.05}, "addin"),
     (("tomato", "paste"), {"water": 0.75, "sugar": 0.12}, "addin"),
     (("vanilla", "extract"), {}, "addin"),
+    (("self", "rising", "flour"), {"flour": 0.92, "leavener": 0.055, "salt": 0.025}, "base"),
+    (("self", "raising", "flour"), {"flour": 0.92, "leavener": 0.055, "salt": 0.025}, "base"),
+    (("self", "rising", "cornmeal"), {"flour": 0.92, "leavener": 0.055, "salt": 0.025}, "base"),
     (("egg", "whites"), {"egg": 1.0}, "base"),
     (("egg", "white"), {"egg": 1.0}, "base"),
     (("egg", "yolks"), {"egg": 1.0}, "base"),
@@ -111,6 +114,26 @@ _FDC_BASE_HEADS = frozenset({
     "coconut cream",
 })
 
+# Exact heads whose reference match is wrong or missing. ``_ALIAS_HEADS``
+# resolve through the reference under a better-matched name (bare "cream"
+# fuzzy-matches a cheese-like entry, so it is resolved as heavy whipping
+# cream — the standard meaning of "1 cup cream" in baking); ``_LITERAL_HEADS``
+# carry hand-set USDA vectors (ice cream's reference match reports ~5% fat,
+# which is a frozen-dairy-dessert entry, not ice cream).
+_ALIAS_HEADS: dict[str, str] = {
+    "cream": "heavy cream",
+    "double cream": "heavy cream",
+    "thickened cream": "heavy cream",
+    "single cream": "light cream",
+}
+
+_ICE_CREAM: dict[str, float] = {"water": 0.56, "fat": 0.11, "sugar": 0.21}
+_LITERAL_HEADS: dict[str, dict[str, float]] = {
+    "ice cream": _ICE_CREAM,
+    "vanilla ice cream": _ICE_CREAM,
+    "chocolate ice cream": _ICE_CREAM,
+}
+
 # Words that mark an FDC-resolved ingredient as a structural base (liquid or
 # sweetener) rather than an add-in.
 _BASE_WORDS = frozenset({
@@ -158,6 +181,14 @@ def _resolve(name: str) -> tuple[dict[str, float], str]:
         vec = reference.fdc_compose(lowered)
         if vec:
             return vec, "base"
+
+    if lowered in _ALIAS_HEADS:
+        vec = reference.fdc_compose(_ALIAS_HEADS[lowered])
+        if vec:
+            return vec, "base"
+
+    if lowered in _LITERAL_HEADS:
+        return dict(_LITERAL_HEADS[lowered]), "base"
 
     word_set = set(words)
     for word, part in _SINGLE:

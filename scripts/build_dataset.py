@@ -10,19 +10,19 @@ Preprocessing (see README):
 2. convert to grams (``src.density``, name-aware densities + container defaults),
 3. keep ingredients whose mass is *significant* (``src.significance``) or that
    are functional (leavener/salt/yeast),
-4. decompose each head into a part weight vector from USDA SR Legacy
-   (``src.ingredients``) in two modes — *full* (add-ins contribute) and
-   *structural* (add-ins zeroed).
+4. decompose each head into structural part weights from USDA SR Legacy
+   (``src.ingredients``): add-ins are zeroed (Ruhlman's convention — validated
+   empirically, the add-in-excluding decomposition classifies better),
+   keeping only flour/liquid/egg/fat/sugar + functional parts.
 
 Only Food.com recipes that are (a) present in RecipeNLG, (b) classified into a
 baked-good class by ``src.tags``, and (c) have ``flour_g > 0`` are kept. The
 ``dessert_other`` weak tier is kept but marked ``tag_confidence == weak``.
 
-Output schema (one row per Food.com recipe)::
+Output schema (one row per Food.com recipe, structural grams)::
 
     recipe_id,name,tag_coarse,tag_fine,tag_confidence,link,source,
     flour_g,sugar_g,fat_g,egg_g,milk_g,water_g,salt_g,leavener_g,yeast_g,
-    flour_s_g,... (structural mode),
     n_significant,mass_significant_frac,
     has_yeast,has_chemical_leavener,has_egg,has_fat,has_sugar,
     calories,nutrition_fat,nutrition_sugar,nutrition_sodium,nutrition_protein,
@@ -54,12 +54,11 @@ CATEGORY_COLUMNS = {
     "yeast": "yeast_g",
 }
 
-_STRUCT_COLUMNS = {part: f"{part}_s_g" for part in CATEGORY_COLUMNS}
+_STRUCT_COLUMNS = {part: f"{part}_g" for part in CATEGORY_COLUMNS}
 _STRUCT_COLUMN_ORDER = [_STRUCT_COLUMNS[part] for part in CATEGORY_COLUMNS]
 
 OUTPUT_COLUMNS = (
     ["recipe_id", "name", "tag_coarse", "tag_fine", "tag_confidence", "link", "source"]
-    + list(CATEGORY_COLUMNS.values())
     + _STRUCT_COLUMN_ORDER
     + ["n_significant", "mass_significant_frac"]
     + ["has_yeast", "has_chemical_leavener", "has_egg", "has_fat", "has_sugar"]
@@ -91,14 +90,32 @@ def _literal_list(value: str) -> list[str] | None:
     return None
 
 
-def analyze_ingredients(ing_list: list[str]) -> tuple[dict, dict, int, float]:
-    """Return (full grams, structural grams, n_significant, significant_mass_frac).
+def analyze_ingredients(ing_list: list[str]) -> tuple[dict, dict, int, float, bool]:
+    """Return (structural grams, n_significant, significant_mass_frac, dropped_nonbaked).
 
     Each ingredient is parsed, converted to grams, and — if significant or
-    functional — decomposed into part vectors (full and structural modes).
+    functional — decomposed into its structural part vector (add-ins zeroed).
+    The *full* USDA vector is still used internally to pick each ingredient's
+    primary part (for the density lookup) and to decide significance, but only
+    the structural grams are accumulated. Component headers ("Cream Cheese
+    Filling", "for the glaze:") split multi-component recipes; lines under a
+    *non-baked* header (frosting, glaze, icing, …) are skipped so decorations
+    never pool into the batter's ratio.
     """
     items: list[tuple[str, float, dict, str, bool]] = []
+    in_nonbaked = False
+    dropped_nonbaked = False
     for ing_str in ing_list:
+        header = parse.component_header(ing_str)
+        if header == "drop":
+            in_nonbaked = True
+            dropped_nonbaked = True
+            continue
+        if header == "keep":
+            in_nonbaked = False
+            continue
+        if in_nonbaked:
+            continue
         p = parse.parse_ingredient(ing_str)
         if not p.head:
             continue
@@ -111,7 +128,6 @@ def analyze_ingredients(ing_list: list[str]) -> tuple[dict, dict, int, float]:
         items.append((p.head, grams, vec_full, primary, functional))
 
     total = sum(g for _, g, *_ in items)
-    full = {col: 0.0 for col in CATEGORY_COLUMNS.values()}
     struct = {col: 0.0 for col in _STRUCT_COLUMN_ORDER}
     n_sig = 0
     sig_mass = 0.0
@@ -121,10 +137,6 @@ def analyze_ingredients(ing_list: list[str]) -> tuple[dict, dict, int, float]:
             continue
         n_sig += 1
         sig_mass += grams
-        for part, frac in vec_full.items():
-            col = CATEGORY_COLUMNS.get(part)
-            if col:
-                full[col] += grams * frac
         vec_struct = ingredients.decompose(head, "structural")
         for part, frac in vec_struct.items():
             col = _STRUCT_COLUMNS.get(part)
@@ -132,7 +144,7 @@ def analyze_ingredients(ing_list: list[str]) -> tuple[dict, dict, int, float]:
                 struct[col] += grams * frac
 
     mass_frac = sig_mass / total if total > 0 else 0.0
-    return full, struct, n_sig, mass_frac
+    return struct, n_sig, mass_frac, dropped_nonbaked
 
 
 def load_food_meta(path: str) -> dict[int, dict]:
@@ -176,6 +188,7 @@ def build(
         "excluded": 0,
         "flourless": 0,
         "kept": 0,
+        "nonbaked_components": 0,
     }
     seen_ids: set[int] = set()
 
@@ -242,8 +255,10 @@ def build(
                 stats["excluded"] += 1
                 continue
 
-            full, struct, n_sig, sig_frac = analyze_ingredients(ing_list)
-            if full["flour_g"] <= 0:
+            struct, n_sig, sig_frac, dropped_nonbaked = analyze_ingredients(ing_list)
+            if dropped_nonbaked:
+                stats["nonbaked_components"] += 1
+            if struct["flour_g"] <= 0:
                 stats["flourless"] += 1
                 continue
 
@@ -264,15 +279,14 @@ def build(
                 "link": link,
                 "source": source,
             }
-            row.update({col: round(full[col], 1) for col in CATEGORY_COLUMNS.values()})
             row.update({col: round(struct[col], 1) for col in _STRUCT_COLUMN_ORDER})
             row["n_significant"] = n_sig
             row["mass_significant_frac"] = round(sig_frac, 4)
-            row["has_yeast"] = 1 if full["yeast_g"] > 0 else 0
-            row["has_chemical_leavener"] = 1 if full["leavener_g"] > 0 else 0
-            row["has_egg"] = 1 if full["egg_g"] > 0 else 0
-            row["has_fat"] = 1 if full["fat_g"] > 0 else 0
-            row["has_sugar"] = 1 if full["sugar_g"] > 0 else 0
+            row["has_yeast"] = 1 if struct["yeast_g"] > 0 else 0
+            row["has_chemical_leavener"] = 1 if struct["leavener_g"] > 0 else 0
+            row["has_egg"] = 1 if struct["egg_g"] > 0 else 0
+            row["has_fat"] = 1 if struct["fat_g"] > 0 else 0
+            row["has_sugar"] = 1 if struct["sugar_g"] > 0 else 0
             row["calories"] = nut[0]
             row["nutrition_fat"] = nut[1]
             row["nutrition_sugar"] = nut[2]
@@ -316,6 +330,7 @@ def main() -> None:
     print(f"excluded (not scratch):{stats['excluded']}")
     print(f"flourless dropped:     {stats['flourless']}")
     print(f"kept (labeled):        {stats['kept']}")
+    print(f"non-baked sections:    {stats['nonbaked_components']} recipes had frosting/glaze dropped")
     print(f"wrote {args.out}")
 
 

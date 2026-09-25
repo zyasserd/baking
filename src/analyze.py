@@ -12,7 +12,10 @@ import numpy as np
 import pandas as pd
 
 
-def pca(clr: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def pca(
+    clr: np.ndarray,
+    orient: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Log-ratio PCA on CLR coordinates.
 
     Returns ``(scores, eigenvalues, loadings, mean)`` where:
@@ -21,6 +24,12 @@ def pca(clr: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray
     - ``loadings`` is (D, D-1): columns are component loadings on the D CLR axes
       (one axis per part), so each component reads as a part balance,
     - ``mean`` is the (D,) CLR center used for projection.
+
+    ``orient`` (length D) is an optional reference direction used to pin each
+    component's otherwise-arbitrary sign: a component is flipped so its loading
+    has a positive dot product with ``orient`` (zero dot falls back to orienting
+    the largest-magnitude loading positive). Passing ``+sugar`` keeps PC1
+    reading "rich > lean" across runs.
     """
     clr = np.asarray(clr, dtype=float)
     mean = clr.mean(axis=0)
@@ -35,6 +44,19 @@ def pca(clr: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray
     # CLR is over-parameterized: the last eigenvalue is (numerically) zero.
     eigvals = eigvals[:-1]
     eigvecs = eigvecs[:, :-1]
+
+    # Deterministic sign convention: eigenvector signs from eigh are arbitrary
+    # (they can flip between runs). Orient each component by ``orient`` when
+    # given, else make its largest-magnitude loading positive. With
+    # ``orient = +sugar`` PC1 always reads rich > lean.
+    for j in range(eigvecs.shape[1]):
+        col = eigvecs[:, j]
+        if orient is not None:
+            ref = float(orient @ col)
+            if ref < 0 or (ref == 0 and col[np.argmax(np.abs(col))] < 0):
+                eigvecs[:, j] = -col
+        elif col[np.argmax(np.abs(col))] < 0:
+            eigvecs[:, j] = -col
 
     scores = X @ eigvecs
     return scores, eigvals, eigvecs, mean

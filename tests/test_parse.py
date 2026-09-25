@@ -46,3 +46,38 @@ def test_no_quantity():
     p = parse.parse_ingredient("salt to taste")
     assert p.qty is None
     assert p.unit is None
+
+
+def test_component_headers_classified():
+    assert parse.component_header("Streusel Topping") == "keep"
+    assert parse.component_header("Cream Cheese Filling") == "keep"
+    assert parse.component_header("Cake Batter") == "keep"
+    assert parse.component_header("for the glaze:") == "drop"
+    assert parse.component_header("Cream Cheese Frosting") == "drop"
+    assert parse.component_header("TOPPING:") == "keep"
+    # lowercase bare ingredients are never headers
+    assert parse.component_header("tabasco sauce") is None
+    assert parse.component_header("1/3 cup sugar") is None
+    assert parse.component_header("") is None
+
+
+def test_range_quantity_parses_midpoint():
+    p = parse.parse_ingredient("1 1/2 - 2 cups sliced strawberries")
+    assert p.qty == 1.75
+    assert p.unit == "cup"
+    assert p.head == "strawberries"
+
+
+def test_capitalized_names_not_mangled():
+    # The word regex is lowercase-only; capitalized names must not lose
+    # their first letter(s).
+    assert parse.parse_ingredient("1 cup All-Purpose Flour").head == "all purpose flour"
+    assert parse.parse_ingredient("6 oz. VELVEETA, sliced").head == "velveeta"
+    assert "french" in parse.parse_ingredient("1 loaf French bread").head
+
+
+def test_leading_of_after_container_word():
+    p = parse.parse_ingredient("1 (8 oz.) box of refrigerated pastry")
+    assert p.head == "refrigerated pastry"
+    # mid-name "of" is kept (multi-word rules depend on it)
+    assert parse.parse_ingredient("1 tsp cream of tartar").head == "cream of tartar"

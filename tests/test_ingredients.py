@@ -117,3 +117,21 @@ def test_weights_sum_to_at_most_one():
                  "butter", "flour", "honey", "tomato soup", "banana"]:
         vec = ingredients.decompose(name)
         assert sum(vec.values()) <= 1.0 + 1e-9, name
+
+def test_bare_cream_resolves_as_heavy_cream():
+    vec = ingredients.decompose("cream")
+    assert vec["fat"] > 0.30
+    assert "flour" not in vec
+
+
+def test_self_rising_flour_splits_leavener():
+    vec = ingredients.decompose("self-rising flour")
+    assert vec["flour"] == pytest.approx(0.92)
+    assert vec["leavener"] == pytest.approx(0.055)
+    assert vec["salt"] == pytest.approx(0.025)
+
+
+def test_ice_cream_vector():
+    vec = ingredients.decompose("vanilla ice cream")
+    assert vec["fat"] == pytest.approx(0.11)
+    assert vec["sugar"] == pytest.approx(0.21)

@@ -1,18 +1,12 @@
 """End-to-end baking analysis: do the ratios predict the Food.com tags?
 
-Each recipe is a point on the 5-part simplex (flour, liquid, egg, fat, sugar;
-parts sum to 1). The *features* are the ratios; the *labels* are the independent
-Food.com tag classes (``tag_coarse``), joined from a separate corpus. The book
-ratios (Ruhlman's *Ratio*) are used only as reference archetypes, never as labels.
-
-Two decompositions are available (built by ``scripts/build_dataset.py``):
-
-- ``full`` (the ``*_g`` columns) — every significant ingredient contributes its
-  USDA-derived component mass, including add-ins (chocolate, nuts, fruit, …);
-- ``structural`` (the ``*_s_g`` columns) — add-ins are zeroed, reproducing
-  Ruhlman's clean flour:liquid:egg:fat:sugar ratio.
-
-``--simplex full|structural|both`` selects which to analyze.
+Each recipe is a point on the 5-part structural simplex (flour, liquid, egg,
+fat, sugar; parts sum to 1): add-ins are zeroed, reproducing Ruhlman's clean
+ratio (the add-in-excluding decomposition classifies measurably better than
+pooled add-ins — the comparison that chose it is documented in the README).
+The *features* are the ratios; the *labels* are the independent Food.com tag
+classes (``tag_coarse``), joined from a separate corpus. The book ratios are
+used only as reference archetypes, never as labels.
 
 Analysis runs in Aitchison geometry (CLR/ILR): log-ratio PCA, robust outlier
 elimination, clustering vs the tag classes (ARI + confusion), and the class
@@ -29,17 +23,6 @@ import pandas as pd
 
 from src import analyze, cluster, composition, manifold, preprocess, visualize
 
-_GRAM_PARTS = ["flour", "sugar", "fat", "egg", "milk", "water"]
-
-
-def _mode_frame(df: pd.DataFrame, mode: str) -> pd.DataFrame:
-    if mode == "full":
-        return df
-    d = df.copy()
-    for part in _GRAM_PARTS:
-        d[f"{part}_g"] = d[f"{part}_s_g"]
-    return d
-
 
 def _analyze(df: pd.DataFrame, args: argparse.Namespace, outdir: str) -> dict:
     os.makedirs(outdir, exist_ok=True)
@@ -53,7 +36,11 @@ def _analyze(df: pd.DataFrame, args: argparse.Namespace, outdir: str) -> dict:
     comp = composition.compositions(df)
     clr, ilr = composition.coordinates(df)
 
-    scores, eigvals, loadings, mean = analyze.pca(clr)
+    # Pin PC1's sign to the sugar direction so it always reads rich > lean
+    # (eigenvector signs from eigh are arbitrary and can flip between runs).
+    richness = np.zeros(len(composition.PARTS))
+    richness[composition.PARTS.index("sugar")] = 1.0
+    scores, eigvals, loadings, mean = analyze.pca(clr, orient=richness)
     variance = analyze.variance_table(eigvals)
     loadings_df = analyze.loading_table(loadings, composition.PARTS)
     variance.to_csv(os.path.join(outdir, "variance.csv"), index=False)
@@ -158,8 +145,8 @@ def _analyze(df: pd.DataFrame, args: argparse.Namespace, outdir: str) -> dict:
     return metrics
 
 
-def _report(df: pd.DataFrame, args: argparse.Namespace, outdir: str, mode: str) -> dict:
-    print(f"\n===== simplex = {mode} ({len(df)} recipes) =====")
+def _report(df: pd.DataFrame, args: argparse.Namespace, outdir: str) -> dict:
+    print(f"\n===== structural simplex ({len(df)} recipes) =====")
     print("Class distribution:")
     for name, count in df["tag_coarse"].value_counts().items():
         print(f"  {name:<12} {count}")
@@ -207,12 +194,6 @@ def main() -> None:
         default=None,
         help="Only keep recipes with at least this tag confidence",
     )
-    parser.add_argument(
-        "--simplex",
-        choices=["full", "structural", "both"],
-        default="full",
-        help="Which decomposition to analyze (default full)",
-    )
     args = parser.parse_args()
 
     os.makedirs(args.outdir, exist_ok=True)
@@ -237,34 +218,7 @@ def main() -> None:
         print(f"Dropped {int((~keep).sum())} recipes below {args.min_flour} g flour.")
         df = df[keep].reset_index(drop=True)
 
-    if args.simplex == "full":
-        _report(df, args, args.outdir, "full")
-    elif args.simplex == "structural":
-        _report(_mode_frame(df, "structural"), args, os.path.join(args.outdir, "structural"), "structural")
-    else:  # both
-        m_full = _report(df, args, os.path.join(args.outdir, "full"), "full")
-        m_struct = _report(
-            _mode_frame(df, "structural"),
-            args,
-            os.path.join(args.outdir, "structural"),
-            "structural",
-        )
-
-        rows = []
-        for label, m in [("full", m_full), ("structural", m_struct)]:
-            rows.append(
-                {
-                    "simplex": label,
-                    "recipes": m["n"],
-                    "ari_vs_tag_coarse": (round(m["ari"], 4) if m["ari"] is not None else None),
-                    "silhouette": (round(m["silhouette"], 4) if m["silhouette"] is not None else None),
-                    "pc1_lean_to_rich": " < ".join(m["pc1_order"]),
-                }
-            )
-        comp_df = pd.DataFrame(rows)
-        comp_df.to_csv(os.path.join(args.outdir, "simplex_comparison.csv"), index=False)
-        print("\n===== full vs structural =====")
-        print(comp_df.to_string(index=False))
+    _report(df, args, args.outdir)
 
     print(f"\nOutputs written under {args.outdir}/")
 

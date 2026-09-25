@@ -69,3 +69,34 @@ def test_mangled_weight_amounts_left_alone():
     # "12 oz" and "16 oz" are real whole weights, not 1/2 or 1/6 of an ounce.
     assert units.parse_ingredient_amount("12 oz chocolate") == (12.0, "oz")
     assert units.parse_ingredient_amount("16 oz package") == (16.0, "oz")
+
+
+def test_quantity_range_midpoint():
+    assert units.parse_ingredient_amount("2 -3 cups flour") == (2.5, "cup")
+    assert units.parse_ingredient_amount("1 1/2 - 2 cups strawberries")[0] == 1.75
+    assert units.parse_ingredient_amount("1 -2 tablespoon oil") == (1.5, "tbsp")
+    assert units.parse_ingredient_amount("3 -4 eggs") == (3.5, None)
+    assert units.parse_ingredient_amount("1 to 2 cups milk") == (1.5, "cup")
+    assert units.parse_ingredient_amount("1/2 -1 cup sugar") == (0.75, "cup")
+
+
+def test_quantity_range_with_mangled_first_number():
+    # "1/2 - 2 cups" appears mangled as "12 -2 cups".
+    assert units.parse_ingredient_amount("12 -2 cups flour") == (1.25, "cup")
+
+
+def test_range_strip_amount():
+    assert units.strip_amount("2 -3 cups all-purpose flour") == "all-purpose flour"
+    assert units.strip_amount("1 1/2 - 2 cups sliced strawberries") == "sliced strawberries"
+
+
+def test_mangled_fraction_ranges():
+    # "1/4 - 1/2 cup" and "3/8 - 3/4 cup" arrive slash-less as "14-12" / "38-34".
+    assert units.parse_ingredient_amount("14-12 cup unsalted butter") == (0.375, "cup")
+    assert units.parse_ingredient_amount("38-34 cup unsalted butter") == (0.5625, "cup")
+    assert units.parse_ingredient_amount("34-38 cup sugar") == (0.5625, "cup")
+
+
+def test_package_size_fraction():
+    assert units.parse_ingredient_amount("1 (10 5/8 oz) box pasta") == (10.625, "oz")
+    assert units.parse_ingredient_amount("2 (3 1/2 oz.) pkg. candy")[0] == 7.0

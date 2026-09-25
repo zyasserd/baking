@@ -4,7 +4,7 @@
 ``pca_biplot`` overlays part loadings and book archetypes on the recipe score
 scatter; ``ternary`` draws the simplex in (flour, liquid, enrich) barycentric
 coordinates; ``cluster_scatter`` colors the PCA projection by cluster;
-``simplex_3d`` draws the 4-part tetrahedron (with the fat+sugar fold) and
+``simplex_3d`` draws the 4-part tetrahedron (with the egg-in-liquid fold) and
 ``pca_3d`` the top-3 log-ratio components.
 """
 

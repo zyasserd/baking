@@ -46,3 +46,22 @@ def test_interpret_components_length():
     lines = analyze.interpret_components(loadings, composition.PARTS)
     assert len(lines) == 4
     assert all(line.startswith(f"PC{i + 1}:") for i, line in enumerate(lines))
+
+
+def test_pca_sign_convention():
+    # Component signs are arbitrary in eigh; the convention pins the largest
+    # loading positive so PC1 always reads the same direction across runs.
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(500, 4))
+    scores, _, loadings, _ = analyze.pca(X)
+    for j in range(loadings.shape[1]):
+        assert loadings[np.argmax(np.abs(loadings[:, j])), j] > 0
+
+
+def test_pca_orient_pins_sugar_positive():
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(500, 5))
+    orient = np.zeros(5)
+    orient[4] = 1.0  # "sugar" direction
+    _, _, loadings, _ = analyze.pca(X, orient=orient)
+    assert loadings[4, 0] > 0

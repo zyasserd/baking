@@ -37,6 +37,26 @@ _PREP_PROPS = frozenset({
 _PAREN_RE = re.compile(r"\(([^)]*)\)")
 _WORD_RE = re.compile(r"[a-z0-9]+")
 
+# Multi-component recipes (a coffee cake = streusel + filling + batter) keep
+# their section headers as quantity-less lines in the flattened ingredient
+# list ("Streusel Topping", "Cream Cheese Filling", "for the glaze:").
+_COMPONENT_RE = re.compile(
+    r"^(?:for\s+(?:the|a)\s+)?(?:[a-z][a-z' ]{0,30}?\s+)?"
+    r"(?P<kind>toppings?|fillings?|streusel|crusts?|batters?|glazes?|icings?"
+    r"|frostings?|doughs?|mixtures?|layers?|coatings?|ganache|drizzles?|crumbs?)"
+    r"\s*:?\s*$",
+    re.IGNORECASE,
+)
+
+# Sections whose ingredients never bake into the crumb (they are spread on
+# after baking or are pure decorations): their mass must not be pooled into
+# the batter's ratio. Everything else (streusel, filling, crust, dough, …)
+# bakes with the recipe and stays pooled.
+_NONBAKED_KINDS = frozenset({
+    "glaze", "glazes", "icing", "icings", "frosting", "frostings",
+    "ganache", "drizzle", "drizzles", "coating", "coatings",
+})
+
 # Stray unit/measure words that leak into the name when the amount carries a
 # parenthetical size ("1 (8 oz.) pkg. cream cheese" -> head "cream cheese").
 _UNIT_WORDS = frozenset({
@@ -70,12 +90,42 @@ def _strip_props(name: str) -> tuple[str, list[str]]:
     kept: list[str] = []
     props: list[str] = []
     for chunk in name.split(","):
-        for token in _WORD_RE.findall(chunk):
+        # Lowercase before tokenizing: the word regex is lowercase-only, and
+        # capitalized names ("French bread", brand names) would otherwise
+        # lose their first letter(s).
+        for token in _WORD_RE.findall(chunk.lower()):
             if token in _PREP_PROPS or token in _UNIT_WORDS:
                 props.append(token)
             else:
                 kept.append(token)
-    return " ".join(kept).strip(), props
+    head = " ".join(kept).strip()
+    # Stray connective left when a container word moved to props
+    # ("box of X" -> "of X"). Only leading; "cream of tartar" keeps its "of".
+    if head.startswith("of "):
+        head = head[3:]
+    return head, props
+
+
+def component_header(line: str) -> str | None:
+    """Classify a quantity-less line as a recipe section header.
+
+    Returns ``"drop"`` for non-baked sections (frosting, glaze, icing, …),
+    ``"keep"`` for baked sections (streusel, filling, crust, batter, …), or
+    ``None`` when the line is not a header. Headers in the corpus are Title
+    Case, ALL CAPS, or prefixed ``"for the"``; a bare lowercase ingredient
+    (``"tabasco sauce"``) is never mistaken for one.
+    """
+    s = (line or "").strip()
+    if not s or units.parse_ingredient_amount(s)[0] is not None:
+        return None
+    m = _COMPONENT_RE.match(s)
+    if m is None:
+        return None
+    if not (s.lower().startswith(("for the", "for a")) or s == s.title() or s.isupper()):
+        return None
+    if m.group("kind").lower() in _NONBAKED_KINDS or "whipped" in s.lower():
+        return "drop"
+    return "keep"
 
 
 def parse_ingredient(s: str) -> Parsed:
@@ -86,6 +136,10 @@ def parse_ingredient(s: str) -> Parsed:
     # Parentheticals (size hints, qualifiers) -> note.
     notes = [m.strip() for m in _PAREN_RE.findall(name)]
     name = _PAREN_RE.sub(" ", name)
+
+    # Stray connective left after the amount is stripped ("box of X" ->
+    # "of X" once "box" moves to props).
+    name = re.sub(r"^of\s+", "", name, flags=re.IGNORECASE)
 
     name = _resolve_or(name)
     head, props = _strip_props(name)

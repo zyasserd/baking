@@ -39,8 +39,9 @@ _AMOUNT_UNIT_RE = re.compile(
 )
 
 # "2 (16 oz.) pkg." -> 2 * 16 oz; "1 (8 oz.) pkg. cream cheese" -> 8 oz.
+# The size may be a mangled fraction ("10 5/8 g" for "10 5/8 oz").
 _PACKAGE_RE = re.compile(
-    r"\A\s*(?P<count>\d+(?:\.\d+)?)\s*\(\s*(?P<size>\d+(?:\.\d+)?)\s*"
+    r"\A\s*(?P<count>\d+(?:\.\d+)?)\s*\(\s*(?P<size>" + _NUMBER + r")\s*"
     r"(?P<unit>oz|ounce|ounces|g|gram|grams|lb|pound|pounds)\s*\)",
     re.IGNORECASE,
 )
@@ -126,6 +127,69 @@ _FRACTION_MANGLE: dict[str, tuple[int, int]] = {
 
 _RECONSTRUCT_UNITS = frozenset({"cup", "tbsp", "tsp", "pt", "qt", "gal", "lb"})
 
+# Quantity ranges: "2 -3 cups", "1 1/2 - 2 cups", "1 to 2 cups". The range's
+# second number and the unit would otherwise leak into the ingredient head.
+_RANGE_RE = re.compile(
+    r"\A\s*(?P<a>" + _NUMBER + r")\s*(?:-|–|—|to)\s*(?P<b>" + _NUMBER + r")"
+    r"\s*(?P<unit>" + _UNIT + r")?\b",
+    re.IGNORECASE,
+)
+
+
+def _unmangle(value: float) -> float | None:
+    """Undo a mangled fraction ("12" -> 0.5, "34" -> 0.75) when plausible."""
+    if value != int(value) or not (10 <= value <= 999):
+        return None
+    frac = _FRACTION_MANGLE.get(str(int(value)))
+    if frac is None:
+        return None
+    return frac[0] / frac[1]
+
+
+def _range_values(a: float, b: float) -> tuple[float, float]:
+    """Choose the ascending interpretation of a possibly-mangled pair.
+
+    RecipeNLG drops slashes in fractions, so "1/4 - 1/2 cup" reaches us as
+    "14-12 cup" and "3/8 - 3/4 cup" as "38-34 cup". Both numbers may need
+    un-mangling; prefer the interpretation that makes the pair ascending.
+    """
+    if a <= b:
+        # "34-38 cup" can be a mangled "3/4 - 3/8 cup": when BOTH numbers map
+        # to plausible cooking fractions, they are mangled (a raw 34-38 range
+        # of cups is absurd), so un-mangle both.
+        ua = _unmangle(a)
+        ub = _unmangle(b)
+        if ua is not None and ub is not None:
+            return min(ua, ub), max(ua, ub)
+        return a, b
+    ua = _unmangle(a)
+    ub = _unmangle(b)
+    candidates: list[tuple[float, float]] = []
+    if ua is not None and ub is not None:
+        candidates.append((ua, ub))
+    if ua is not None:
+        candidates.append((ua, b))
+    if ub is not None:
+        candidates.append((a, ub))
+    for x, y in candidates:
+        if x <= y:
+            return x, y
+    return b, b
+
+
+def _parse_range(s: str) -> tuple[float | None, str | None, int] | None:
+    """Match a leading range "1 1/2 - 2 cups"; return (midpoint, unit, end)."""
+    m = _RANGE_RE.match(s)
+    if not m:
+        return None
+    a = _parse_number(m.group("a"))
+    b = _parse_number(m.group("b"))
+    if a is None or b is None:
+        return None
+    a, b = _range_values(a, b)
+    unit = _canon(m.group("unit"))
+    return (a + b) / 2.0, unit, m.end()
+
 _MANGLED_FRACTION_RE = re.compile(r"\A\s*(\d{2,3})\s+([A-Za-z]+)\.?")
 _MANGLED_MIXED_RE = re.compile(r"\A\s*(\d+)\s+(\d{2,3})\s+([A-Za-z]+)\.?")
 
@@ -169,12 +233,18 @@ def parse_ingredient_amount(s: str | None) -> tuple[float | None, str | None]:
 
     s = _LEADING_WORDS.sub("", s)
 
+    rng = _parse_range(s)
+    if rng:
+        return rng[0], rng[1]
+
     s = _normalize_mangled_fraction(s)
 
     m = _PACKAGE_RE.match(s)
     if m:
         count = float(m.group("count"))
-        size = float(m.group("size"))
+        size = _parse_number(m.group("size"))
+        if size is None:
+            size = 0.0
         unit = _canon(m.group("unit"))
         return count * size, unit
 
@@ -192,6 +262,9 @@ def strip_amount(s: str | None) -> str:
     if not s:
         return ""
     stripped = _strip_abbrev_periods(s.strip())
+    rng = _parse_range(stripped)
+    if rng:
+        return stripped[rng[2]:].strip()
     m = _AMOUNT_UNIT_RE.match(stripped)
     if m:
         return stripped[m.end():].strip()

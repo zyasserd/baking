@@ -11,6 +11,8 @@ The keyword lists are parameters: edit them to tune the filter.
 
 from __future__ import annotations
 
+import re
+
 # Ingredient text that signals a prepared (not-from-scratch) ingredient.
 PREPARED_INGREDIENT_KEYWORDS = (
     "cookie dough",
@@ -42,6 +44,91 @@ PREPARED_INGREDIENT_KEYWORDS = (
     "biscuit mix",
     "pie mix",
     "quick bread mix",
+    "pudding mix",
+    "instant pudding",
+    "baking mix",
+    "cheesecake mix",
+    "cobbler mix",
+    "stuffing mix",
+    "soup mix",
+    "seasoning mix",
+    "crescent",
+    # Purchased bread used as a base (cheese breads, stratas): the loaf's
+    # flour/water/sugar is the recipe's whole structure, hidden from parsing.
+    "french bread",
+    "italian bread",
+    "sourdough bread",
+    "garlic bread",
+    "ciabatta",
+    "focaccia",
+    "brioche",
+    "challah",
+    "naan",
+    "flatbread",
+    "baguette",
+    "breadstick",
+    "bread stick",
+    "dinner rolls",
+    "hot dog bun",
+    "hamburger bun",
+    "sandwich bread",
+    "stale bread",
+    # "Refrigerated X" is always a prepared product in this corpus
+    # (refrigerated buttermilk biscuits, breadstick dough, dinner rolls).
+    "refrigerated",
+    # Any finished baked good used as an ingredient — the recipe is an
+    # assembly, not a from-scratch bake. Breadcrumbs are a baked good too.
+    "biscuit",
+    "croissant",
+    "bagel",
+    "english muffin",
+    "crumpet",
+    "pita",
+    "tortilla",
+    "pretzel",
+    "crouton",
+    "breadcrumb",
+    "bread crumb",
+    "pancakes",
+    "waffles",
+    "waffle mix",
+    "doughnut",
+    "donut",
+    "pound cake",
+    "angel food",
+    "sponge cake",
+    "twinkie",
+    "ladyfinger",
+    "oreo",
+    "nilla wafer",
+    "vanilla wafer",
+    "nutter butter",
+    "ginger snap",
+    "graham cracker",
+    "graham crumbs",
+    "graham crust",
+    "saltine",
+    "animal cracker",
+    "ritz",
+    "pie shell",
+    "prebaked",
+    "pre-baked",
+    "prepared crust",
+    "store-bought",
+    "store bought",
+)
+
+# Substring matching is too blunt for a few words that name both a raw
+# ingredient and a finished product. "bread" must not match "bread flour"
+# (a raw high-protein flour) or "breaded" chicken; "crust" must not match
+# "crustless". These are regex patterns searched against each line.
+PREPARED_INGREDIENT_PATTERNS = (
+    r"bread(?! ?(?:flour|crumb|spice|machine))(?!ed\b)",
+    r"crust(?!less)",
+)
+
+_PREPARED_PATTERNS = tuple(
+    re.compile(p, re.IGNORECASE) for p in PREPARED_INGREDIENT_PATTERNS
 )
 
 # Title keywords that signal a no-bake / frozen item.
@@ -90,8 +177,11 @@ def is_excluded(title: str, ingredients: list[str]) -> bool:
     if _has_any(title, NO_BAKE_TITLE_KEYWORDS):
         return True
 
+    patterns = _PREPARED_PATTERNS
     for ing in ingredients:
         if _has_any(ing, PREPARED_INGREDIENT_KEYWORDS):
+            return True
+        if any(p.search(ing) for p in patterns):
             return True
 
     if _has_any(title, TOPPING_TITLE_KEYWORDS) and not _has_any(
