@@ -139,3 +139,17 @@ def test_ice_cream_vector():
     vec = ingredients.decompose("vanilla ice cream")
     assert vec["fat"] == pytest.approx(0.11)
     assert vec["sugar"] == pytest.approx(0.21)
+
+
+def test_fat_free_broth_resolves_as_broth_not_chicken_fat():
+    # Regression: "Fat, chicken" (schmaltz, 99.8% fat) used to win the fuzzy
+    # match via the subset bonus and poison broth heads with fat.
+    vec = ingredients.resolve("sodium fat free chicken broth")[0]
+    assert vec["water"] > 0.9
+    assert vec["fat"] < 0.05
+
+
+def test_two_token_subset_desc_gets_no_bonus():
+    # The subset bonus must not hand short wrong-food descriptions the win.
+    vec = ingredients.resolve("fat free chicken broth")[0]
+    assert vec["water"] > 0.9

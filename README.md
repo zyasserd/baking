@@ -12,7 +12,7 @@ point on the ingredient simplex) and their ratios are scored against the
 
 **Result: yes, partially.** The classes order correctly along the rich-vs-lean
 axis (PC1), and unsupervised clustering of the ratios beats chance against the
-tags (ARI ≈ 0.18), but the classes bleed into each other (silhouette ≈ 0):
+tags (ARI ≈ 0.19), but the classes bleed into each other (silhouette ≈ 0):
 baking is a continuum, and the tags are fuzzy labels on it.
 
 ## Layout
@@ -43,8 +43,11 @@ src/
     pca.py                 log-ratio PCA
     folds.py               book archetypes, tetrahedron fold
     cluster.py             outliers, k-means/GMM, ARI
-    validate.py            diagnostics: labels vs titles, mass vs nutrition
-    visualize.py           static + interactive figures
+    validate.py            diagnostics: labels vs titles, mass vs nutrition,
+                           per-class extremes, envelope outliers
+    robustness.py          permutation null, bootstrap CI, k sweep, PC stability
+    quality.py             data-quality report (density bases, unresolved heads)
+    report.py              the single self-contained HTML report
 data/
   raw/                     raw corpora (gitignored): nix-staged store
                            symlinks + the manual Kaggle download
@@ -137,8 +140,12 @@ because it is the project's main methodological decision:
 - **Structural** — add-ins are *zeroed*: only structure-forming ingredients
   count (flours, sugars, fats, eggs, dairy, water, leaveners, salt, yeast),
   reproducing Ruhlman's clean ratio; the chocolate is flavor, not structure.
+  One documented exception: water-dominant add-ins (moist produce —
+  applesauce, pumpkin, banana, zucchini, berries — acting as the recipe's
+  hydration) contribute their USDA water fraction to the liquid part; their
+  remaining parts stay zeroed.
 
-Clustering the tag classes with each gives ARI 0.177 (structural, the shipped
+Clustering the tag classes with each gives ARI 0.194 (structural, the shipped
 pipeline) vs ≈ 0.16 (full, at the last direct comparison) and better-separated
 archetypes — the add-in-excluding decomposition wins, so **structural is what
 the pipeline ships**. The full vector still exists internally (it picks each
@@ -146,27 +153,43 @@ ingredient's primary part for the density lookup); it never reaches the dataset.
 
 ## Reading the results
 
-- `variance.csv` / `scree.png` — the simplex really is 4-D; PC1 (rich vs lean)
-  dominates but is only half the variance.
+**`output/report.html` is the one artifact to open** — a single self-contained
+page (plotly.js inlined, opens offline) holding every panel: the PCA scatter
+with book archetypes, the same view colored by cluster, the simple-ratio plane
+(log flour:liquid vs log flour:rich, class hulls), PC1 by class, the ternary
+and tetrahedron simplexes, the confusion matrix, the k sweep, and the
+diagnostics tables. Recipes hover with their name, class, simple ratios
+(`flour:liquid:egg:fat:sugar` per 100 flour) and nearest archetype.
+
+Remaining outputs, for programmatic use:
+
+- `variance.csv` — the simplex really is 4-D; PC1 (rich vs lean) dominates but
+  is only half the variance.
 - `loadings.csv` — PC1 = `+sugar +fat +egg vs −liquid −flour`, exactly the
   rich-vs-lean balance Ruhlman describes.
 - `class_pc1_summary.csv` — the classes order correctly along PC1
   (`batter < bread < pie_pastry < quick_bread < cake < cookie < brownies`),
   confirming the ratio *does* encode the right gradient.
-- `simplex_3d.html` — the 3D tetrahedron `flour / liquid+egg / fat / sugar`; the
-  egg-into-liquid fold separates the tag classes best of all ten merges (see
-  `config.TETRAHEDRON_PARTS` for the empirical comparison).
 - Clustering runs in the **top-3 log-ratio PCs** (not 2): 3D beats 2D and PC4
   only adds noise.
 - `compositions.csv` — one row per recipe: the 5-part proportions plus its
   nearest book archetype and Aitchison distance to it (and the recipe `url`).
-- `tag_confusion.png` and `cluster_report.txt` — the classes bleed into each
-  other (ARI ≈ 0.18, silhouette ≈ 0): baking is a continuum, and the Food.com
+- `cluster_report.txt` and `tag_confusion.csv` — the classes bleed into each
+  other (ARI ≈ 0.19, silhouette ≈ 0): baking is a continuum, and the Food.com
   tags are fuzzy labels on it, not crisp ratio clusters.
 - `tag_validation.txt` — title-agreement spot check per class, written
   automatically by stage 2 (`src/analysis/validate.py`).
 - `nutrition_validation.csv` — estimated structural grams vs Food.com nutrition
   (independent per-serving data) correlations, per class.
+- `class_extremes.csv` / `outliers.csv` — the per-class far-from-centroid
+  recipes and the robust-Mahalanobis-dropped tail, both with inspection
+  evidence (worst-deviating part, parse coverage, unresolved mass).
+- `k_sweep.csv`, `ari_null.csv`, `ari_bootstrap.csv`, `pc_stability.csv` —
+  robustness baselines: ARI's permutation p-value and bootstrap CI, the
+  silhouette/ARI trade-off per k, and PC1's bootstrap stability.
+- `data_quality.csv` / `unresolved_heads.csv` — mass share per density
+  conversion basis and the heaviest unresolved ingredient heads (the standing
+  curation queue; see `src/analysis/quality.py`).
 
 ## Tests
 

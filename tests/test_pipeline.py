@@ -1,7 +1,6 @@
 """Unit tests for the baking-ratio pipeline."""
 
 import numpy as np
-import pytest
 
 from src.analysis import coda as preprocess
 

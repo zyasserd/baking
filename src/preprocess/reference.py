@@ -7,7 +7,7 @@ the backing CSV (``config.FDC_REFERENCE_CSV``) from the flake-staged SR Legacy
 tables; this module loads it, maps a cleaned ingredient head to a food, and
 converts its nutrients to a part vector.
 
-Nutrient -> part transform (documented, tunable — see config FDC section):
+Nutrient -> part transform (implemented below in ``nutrient_to_parts``):
 
     water   -> ``water``
     lipid   -> ``fat``
@@ -28,14 +28,158 @@ this module.
 from __future__ import annotations
 
 import csv
-import os
 import re
 from functools import lru_cache
 
 import config
 
-_CURATED = config.FDC_CURATED
-_STARCH_CATEGORIES = config.FDC_STARCH_CATEGORIES
+# Food categories whose carbohydrate is treated as starch ("flour" part) in the
+# nutrient -> part transform, so that e.g. cocoa or dried fruit do not leak into
+# "flour" through their carbohydrate.
+_STARCH_CATEGORIES = frozenset({
+    "Cereal Grains and Pasta",
+    "Legumes and Legume Products",
+    "Vegetables and Vegetable Products",
+    "Breakfast Cereals",
+    "Baked Products",
+    "Snacks",
+    "Meals, Entrees, and Side Dishes",
+})
+
+# Sodium -> salt conversion (Na x 2.5 = NaCl) and the trace-composition cutoff.
+SODIUM_TO_SALT = 2.5
+TRACE_CUTOFF = 1e-6
+
+# Curated head -> exact USDA SR Legacy description, resolved to an fdc_id at
+# load time. These are hand-checked disambiguations for heads the fuzzy matcher
+# gets wrong or misses (bare "cream" fuzzy-matches a cheese-like entry; ice
+# cream's match is a frozen-dairy-dessert entry). Keyed by the human-readable
+# description — validated to be unique in the table — instead of an opaque
+# fdc_id, so the mapping is readable and self-verifying against the shipped
+# SR Legacy release.
+_CURATED_DESCRIPTIONS: dict[str, str] = {
+    "cream cheese": 'Cheese, cream',
+    "cottage cheese": 'Cheese, cottage, creamed, large or small curd',
+    "ricotta": 'Cheese, ricotta, whole milk',
+    "ricotta cheese": 'Cheese, ricotta, whole milk',
+    "sour cream": 'Cream, sour, cultured',
+    "yogurt": 'Yogurt, plain, whole milk',
+    "yoghurt": 'Yogurt, plain, whole milk',
+    "plain yogurt": 'Yogurt, plain, whole milk',
+    "greek yogurt": 'Yogurt, plain, whole milk',
+    "buttermilk": 'Milk, buttermilk, fluid, cultured, lowfat',
+    "heavy cream": 'Cream, fluid, heavy whipping',
+    "heavy whipping cream": 'Cream, fluid, heavy whipping',
+    "whipping cream": 'Cream, fluid, heavy whipping',
+    "light cream": 'Cream, fluid, light (coffee cream or table cream)',
+    "half and half": 'Cream, fluid, half and half',
+    "whole milk": 'Milk, whole, 3.25% milkfat, with added vitamin D',
+    "evaporated milk": 'Milk, canned, evaporated, with added vitamin D and without added vitamin A',
+    "condensed milk": 'Milk, canned, condensed, sweetened',
+    "sweetened condensed milk": 'Milk, canned, condensed, sweetened',
+    "honey": 'Honey',
+    "maple syrup": 'Syrups, maple',
+    "corn syrup": 'Syrups, corn, light',
+    "dark corn syrup": 'Syrups, corn, dark',
+    "molasses": 'Molasses',
+    "golden syrup": 'Syrups, corn, light',
+    "brown sugar": 'Sugars, brown',
+    "powdered sugar": 'Sugars, powdered',
+    "confectioners sugar": 'Sugars, powdered',
+    "icing sugar": 'Sugars, powdered',
+    "granulated sugar": 'Sugars, granulated',
+    "white sugar": 'Sugars, granulated',
+    "caster sugar": 'Sugars, granulated',
+    "chocolate": 'Chocolate, dark, 45- 59% cacao solids',
+    "dark chocolate": 'Chocolate, dark, 70-85% cacao solids',
+    "semisweet chocolate": 'Candies, semisweet chocolate',
+    "chocolate chips": 'Candies, semisweet chocolate',
+    "cocoa": 'Cocoa, dry powder, unsweetened',
+    "cocoa powder": 'Cocoa, dry powder, unsweetened',
+    "unsweetened cocoa": 'Cocoa, dry powder, unsweetened',
+    "dutch cocoa": 'Cocoa, dry powder, unsweetened',
+    "oats": 'Cereals, oats, regular and quick, not fortified, dry',
+    "rolled oats": 'Cereals, oats, regular and quick, not fortified, dry',
+    "quick oats": 'Cereals, oats, regular and quick, not fortified, dry',
+    "old fashioned oats": 'Cereals, oats, regular and quick, not fortified, dry',
+    "pecans": 'Nuts, pecans, dry roasted, with salt added',
+    "pecan": 'Nuts, pecans, dry roasted, with salt added',
+    "walnuts": 'Nuts, walnuts, black, dried',
+    "walnut": 'Nuts, walnuts, black, dried',
+    "almonds": 'Nuts, almonds, dry roasted, without salt added',
+    "almond": 'Nuts, almonds, dry roasted, without salt added',
+    "raisins": "Raisins, dark, seedless (Includes foods for USDA's Food Distribution Program)",
+    "raisin": "Raisins, dark, seedless (Includes foods for USDA's Food Distribution Program)",
+    "dates": 'Dates, deglet noor',
+    "dried cranberries": "Cranberries, dried, sweetened (Includes foods for USDA's Food Distribution Program)",
+    "cranberries": "Cranberries, dried, sweetened (Includes foods for USDA's Food Distribution Program)",
+    "coconut": 'Nuts, coconut meat, dried (desiccated), not sweetened',
+    "unsweetened coconut": 'Nuts, coconut meat, dried (desiccated), not sweetened',
+    "shredded coconut": 'Nuts, coconut meat, dried (desiccated), not sweetened',
+    "banana": 'Bananas, raw',
+    "bananas": 'Bananas, raw',
+    "pumpkin": 'Pumpkin, canned, without salt',
+    "canned pumpkin": 'Pumpkin, canned, without salt',
+    "pumpkin puree": 'Pumpkin, canned, without salt',
+    "carrot": 'Carrots, baby, raw',
+    "carrots": 'Carrots, baby, raw',
+    "zucchini": 'Squash, summer, zucchini, includes skin, frozen, unprepared',
+    "applesauce": 'Applesauce, canned, unsweetened, with added ascorbic acid',
+    "lemon juice": 'Lemon juice, raw',
+    "lime juice": 'Lemon juice, raw',
+    "orange juice": "Orange juice, raw (Includes foods for USDA's Food Distribution Program)",
+    "tomato sauce": 'Tomato sauce, canned, no salt added',
+    "mustard": 'Mustard, prepared, yellow',
+    "dijon mustard": 'Mustard, prepared, yellow',
+    "yellow mustard": 'Mustard, prepared, yellow',
+    "ketchup": 'Catsup',
+    "catsup": 'Catsup',
+    "soy sauce": 'Soy sauce made from soy and wheat (shoyu), low sodium',
+    "worcestershire sauce": 'Sauce, worcestershire',
+    "worcestershire": 'Sauce, worcestershire',
+    "vinegar": 'Vinegar, distilled',
+    "distilled vinegar": 'Vinegar, distilled',
+    "white vinegar": 'Vinegar, distilled',
+    "balsamic vinegar": 'Vinegar, distilled',
+    "cider vinegar": 'Vinegar, distilled',
+    "red wine vinegar": 'Vinegar, distilled',
+    "rice vinegar": 'Vinegar, distilled',
+    "chicken broth": 'Soup, chicken broth, canned, condensed',
+    "chicken stock": 'Soup, chicken broth, canned, condensed',
+    "beef broth": 'Soup, chicken broth, canned, condensed',
+    "beef stock": 'Soup, chicken broth, canned, condensed',
+    "vegetable broth": 'Soup, chicken broth, canned, condensed',
+    "wine": 'Alcoholic Beverage, wine, table, red, Gamay',
+    "red wine": 'Alcoholic Beverage, wine, table, red, Gamay',
+    "white wine": 'Alcoholic Beverage, wine, table, red, Gamay',
+    "beer": 'Alcoholic beverage, beer, regular, all',
+    "coffee": 'Beverages, coffee, brewed, breakfast blend',
+    "cornstarch": 'Cornstarch',
+    "corn starch": 'Cornstarch',
+    "marshmallows": 'Candies, marshmallows',
+    "cheddar cheese": "Cheese, cheddar (Includes foods for USDA's Food Distribution Program)",
+    "cheddar": "Cheese, cheddar (Includes foods for USDA's Food Distribution Program)",
+    "mozzarella": 'Cheese, mozzarella, whole milk',
+    "mozzarella cheese": 'Cheese, mozzarella, whole milk',
+    "parmesan": 'Cheese, parmesan, grated',
+    "parmesan cheese": 'Cheese, parmesan, grated',
+    # Heads systematically unresolved by the fuzzy matcher (found via the
+    # per-class extremes report): brans, the slashed-fraction-bearing
+    # "quick cooking oatmeal", and broth heads that token similarity still
+    # routes to canned chicken meat ('Chicken, canned, no broth').
+    "wheat bran": 'Wheat bran, crude',
+    "oat bran": 'Oat bran, raw',
+    "natural bran": 'Wheat bran, crude',
+    "quick cooking oatmeal": 'Cereals, oats, regular and quick, not fortified, dry',
+    "dates pitted": 'Dates, deglet noor',
+    "fat free chicken broth": 'Soup, chicken broth, ready-to-serve',
+    "fat chicken broth": 'Soup, chicken broth, ready-to-serve',
+    # Generic heads: every "Nuts, <kind> nuts" description ties at the same
+    # Jaccard score, and the winner was a coin flip (ginkgo nuts, 55% water,
+    # for 453 rows). Pin to the generic blend.
+    "nuts": 'Nuts, mixed nuts, dry roasted, with peanuts, without salt added',
+    "mixed nuts": 'Nuts, mixed nuts, dry roasted, with peanuts, without salt added',
+}
 
 # Stopwords dropped from both heads and FDC descriptions when matching.
 _STOP = frozenset({
@@ -44,9 +188,20 @@ _STOP = frozenset({
     "salted", "unsalted", "regular", "prepared", "ready", "to", "made", "from",
     "all", "purpose", "style", "nonfat", "low", "reduced", "light", "heavy",
     "whole", "without", "added", "uncooked", "unprepared", "household",
+    # Variety/quality words that carry no compositional information
+    # ("dates pitted organic", "organic whole wheat flour").
+    "pitted", "organic",
+    # Pure noise in compound heads ("fat free chicken broth",
+    # "sugar free chocolate pudding"): the remaining tokens carry the food.
+    # "fat" is always a diet qualifier in this corpus ("low fat", "fat free"),
+    # never the food itself (butter/oil/lard are named directly).
+    "free", "fat",
 })
 
 _WORD_RE = re.compile(r"[a-z0-9]+")
+
+# Minimum description-token count for the subset bonus (see ``fuzzy``).
+_SUBSET_BONUS_MIN_TOKENS = 3
 
 
 def _tokens(text: str) -> list[str]:
@@ -74,6 +229,7 @@ class _Reference:
         self.path = path
         self._by_id: dict[int, dict] = {}
         self._descriptions: list[tuple[int, str]] = []
+        self._by_description: dict[str, list[int]] = {}
         self._postings: dict[str, list[int]] = {}
         self._desc_tokens: dict[int, set[str]] = {}
         self._loaded = False
@@ -86,11 +242,17 @@ class _Reference:
                 fid = int(row["fdc_id"])
                 self._by_id[fid] = row
                 self._descriptions.append((fid, row["description"]))
+                self._by_description.setdefault(row["description"], []).append(fid)
                 toks = _variants(_tokens(row["description"]))
                 self._desc_tokens[fid] = toks
                 for t in toks:
                     self._postings.setdefault(t, []).append(fid)
         self._loaded = True
+
+    def by_description(self, description: str) -> list[int]:
+        """fdc_ids whose exact description equals ``description``."""
+        self._load()
+        return self._by_description.get(description, [])
 
     def composition(self, fdc_id: int) -> dict[str, float] | None:
         row = self._by_id.get(fdc_id)
@@ -126,7 +288,11 @@ class _Reference:
             union = len(tok_set | f)
             score = inter / union
             # Prefer descriptions whose tokens are a subset (more generic).
-            if f <= tok_set:
+            # Only for multi-token descriptions: a short desc like
+            # "Fat, chicken" (schmaltz) is a *different food* that happens to
+            # be a token subset of "fat free chicken broth", and the bonus
+            # would hand it the win over the actual broths.
+            if f <= tok_set and len(f) >= _SUBSET_BONUS_MIN_TOKENS:
                 score += config.FDC_FUZZY_SUBSET_BONUS
             if score > best_score:
                 best_score = score
@@ -148,6 +314,22 @@ def get_reference() -> _Reference:
     return _REF
 
 
+@lru_cache(maxsize=None)
+def _curated_ids() -> dict[str, int]:
+    """Resolve curated descriptions to fdc_ids, validating them at first use."""
+    ref = get_reference()
+    ids: dict[str, int] = {}
+    for head, description in _CURATED_DESCRIPTIONS.items():
+        matches = ref.by_description(description)
+        if len(matches) != 1:
+            state = "missing" if not matches else f"ambiguous ({len(matches)} entries)"
+            raise SystemExit(
+                f"curated USDA description for {head!r} is {state}: {description!r}"
+            )
+        ids[head] = matches[0]
+    return ids
+
+
 def nutrient_to_parts(row: dict) -> dict[str, float]:
     """Convert an FDC nutrient row (per 100 g) to a part weight vector."""
     water = float(row["water_g"])
@@ -164,12 +346,12 @@ def nutrient_to_parts(row: dict) -> dict[str, float]:
         "water": water / 100.0,
         "fat": fat / 100.0,
         "sugar": sugar / 100.0,
-        "salt": sodium * config.FDC_SODIUM_TO_SALT / 100000.0,
+        "salt": sodium * SODIUM_TO_SALT / 100000.0,
     }
-    if category in config.FDC_STARCH_CATEGORIES:
+    if category in _STARCH_CATEGORIES:
         vec["flour"] = starch / 100.0
 
-    vec = {k: v for k, v in vec.items() if v > config.FDC_TRACE_CUTOFF}
+    vec = {k: v for k, v in vec.items() if v > TRACE_CUTOFF}
     return vec
 
 
@@ -177,7 +359,7 @@ def nutrient_to_parts(row: dict) -> dict[str, float]:
 def fdc_compose(head: str) -> dict[str, float] | None:
     """Return the FDC-derived part vector for a head, or ``None`` if unmatched."""
     ref = get_reference()
-    fid = config.FDC_CURATED.get(head)
+    fid = _curated_ids().get(head)
     if fid is not None:
         return ref.composition(fid)
     return ref.fuzzy(head)

@@ -10,7 +10,7 @@ whose entries sum to <= 1 (the remainder is "other" and is ignored). Add-ins
 (chocolate, nuts, fruit, cheese, ...) are zeroed — they are flavor and
 enrichment, not structure, and are excluded from the ratio as in Ruhlman's
 *Ratio* (validated: the add-in-excluding decomposition classifies measurably
-better than pooled add-ins, ARI 0.207 vs 0.176 — see the README).
+better than pooled add-ins, ARI 0.21 vs 0.16 at the comparison run — see the README).
 
 The weights come from **USDA FoodData Central (SR Legacy)** via
 ``src.preprocess.reference``: each ingredient's per-100 g proximate composition
@@ -115,6 +115,11 @@ def decompose(name: str) -> dict[str, float]:
 
     Add-ins (``role == "addin"``) are zeroed — they never enter the ratio.
     Use ``resolve`` for the full vector and the ingredient's role.
+
+    Note the recipe-level exception applied by the pipeline
+    (``pipeline.analyze_ingredients``): a water-dominant add-in (moist
+    produce) contributes its water fraction to the recipe's liquid part.
+    This head-level mapping stays pure.
     """
     vec, role = resolve(name)
     if role == "addin":

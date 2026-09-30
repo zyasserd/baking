@@ -8,9 +8,10 @@ The pipeline has two stages (see README):
 2. **analysis** (`scripts/analyze.py`): that dataset -> PCA, clustering,
    figures, results.
 
-Everything a curious reader might want to re-tune lives here: the taxonomy, the
-decomposition rules, densities, thresholds, folds, seeds. The modules import
-from this file; pure mechanics (regex structure, algorithms) stay with the code.
+Every tunable *decision* lives here: the taxonomy, the decomposition rules,
+densities, thresholds, folds, seeds. Implementation *facts* (unit conversions,
+USDA nutrient ids, curated USDA descriptions, the parser's word tables) live
+with the code that implements them, in ``src/preprocess/``.
 
 Every section below is marked with the stage that consumes it:
 
@@ -54,21 +55,13 @@ RAW_FOOD_RECIPES_CSV = "data/raw/food/RAW_recipes.csv"
 FDC_TABLES_DIR = "data/raw/fdc"
 FDC_REFERENCE_CSV = "data/interim/fdc_srlegacy.csv"
 
-# FDC nutrient ids -> SR Legacy column names (per 100 g).
-FDC_NUTRIENT_IDS = {
-    1051: "water_g",
-    1003: "protein_g",
-    1004: "fat_g",
-    1005: "carb_g",
-    1079: "fiber_g",
-    2000: "sugar_g",
-    1007: "ash_g",
-    1093: "sodium_mg",
-}
-
 # Stage-1 outputs.
 INTERIM_INGREDIENTS_CSV = "data/interim/ingredients.csv"
 PROCESSED_RECIPES_CSV = "data/processed/recipes_simplex.csv"
+
+# Sidecar for the "full" decomposition comparison (add-ins pooled in); written
+# by stage 1, read by stage 2 only when DECOMPOSITION_MODE == "full".
+FULL_GRAMS_CSV = "data/interim/full_grams.csv"
 
 # Analysis outputs directory.
 OUTPUT_DIR = "output"
@@ -92,12 +85,20 @@ OUTPUT_DIR = "output"
 # (chocolate, cocoa, nuts, seeds, fruit, vegetables, cheese, condiments, meats).
 # The shipped decomposition is STRUCTURAL: add-ins are zeroed, reproducing
 # Ruhlman's clean flour:liquid:egg:fat:sugar ratio (validated: clustering with
-# structural grams beats pooled add-ins, ARI 0.207 vs 0.176 — see README).
+# structural grams beats pooled add-ins, ARI 0.22 vs 0.16 — see README).
+# One exception: add-ins whose tracked composition is water-dominant (moist
+# produce — applesauce, pumpkin, banana, zucchini, berries — acting as the
+# recipe's hydration) contribute their USDA water fraction to the liquid part;
+# their remaining parts stay zeroed.
 
 # The tracked parts, in column order (`<part>_g`).
 INGREDIENT_PARTS = [
     "flour", "sugar", "fat", "egg", "milk", "water", "salt", "leavener", "yeast",
 ]
+
+# Minimum closed share of water in an add-in's composition for its water to
+# count as the recipe's liquid (see the decomposition comment above).
+ADDIN_WATER_DOMINANT_SHARE = 0.5
 
 # Multi-word rules, checked first (highest specificity). Each entry is
 # (word sequence, vector, role). Literal vectors are USDA-derived approximations
@@ -201,189 +202,47 @@ INGREDIENT_LITERAL_HEADS: dict[str, dict[str, float]] = {
     "ice cream": INGREDIENT_ICE_CREAM_VECTOR,
     "vanilla ice cream": INGREDIENT_ICE_CREAM_VECTOR,
     "chocolate ice cream": INGREDIENT_ICE_CREAM_VECTOR,
+    # Granular sucrose substitutes are designed to replace sugar 1:1 by
+    # volume; USDA's "Sweeteners, ..." entries report the bulking maltodextrin
+    # as non-sugar carbohydrate, which the transform would ignore.
+    "splenda": {"sugar": 1.0},
+    "splenda granular": {"sugar": 1.0},
 }
 
 # Words that mark an FDC-resolved ingredient as a structural base (liquid or
-# sweetener) rather than an add-in.
+# sweetener) rather than an add-in. Bran is a structural grain fraction;
+# sugar substitutes (splenda, stevia, ...) act as the recipe's sugar. Plant
+# milks are one fused word ("soymilk"), so the "milk" base word never matches
+# them — list them here.
 INGREDIENT_BASE_WORDS = frozenset({
     "milk", "cream", "yogurt", "yoghurt", "buttermilk", "juice", "broth",
     "stock", "wine", "coffee", "espresso", "tea", "cider", "beer", "syrup",
     "honey", "molasses", "treacle", "agave",
+    "bran", "splenda", "stevia", "sweetener", "sucralose",
+    "soymilk",
 })
 
 # ══════════════════════════════════════════════════════════════════════════════
-# USDA REFERENCE MATCHING — FDC SR Legacy lookup.  [STAGE 1]
+# USDA REFERENCE MATCHING — fuzzy-fallback tuning.  [STAGE 1]
 # ══════════════════════════════════════════════════════════════════════════════
 #
-# Nutrient -> part transform (documented, tunable):
-#
-#     water   -> water
-#     lipid   -> fat
-#     sugars  -> sugar
-#     starch  -> flour   (carb - sugar - fiber), *only* for grain/legume/
-#                         vegetable/starch food categories
-#     sodium  -> salt    (Na x 2.5, as NaCl)
-#     protein, fiber, ash, and any starch from non-starch categories -> "other"
-#                                                                  (ignored)
-#
-# The flour part is deliberately restricted to starchy food categories so that
-# e.g. cocoa or dried fruit do not leak into "flour" through their carbohydrate.
-# Pure parts (flour, sugar, butter, egg, milk, water, ...) are pinned to their
-# own part in the decomposition and never reach this mapping.
-
-# Food categories whose carbohydrate is treated as starch ("flour" part).
-FDC_STARCH_CATEGORIES = frozenset({
-    "Cereal Grains and Pasta",
-    "Legumes and Legume Products",
-    "Vegetables and Vegetable Products",
-    "Breakfast Cereals",
-    "Baked Products",
-    "Snacks",
-    "Meals, Entrees, and Side Dishes",
-})
-
-# Curated head -> SR Legacy fdc_id. Hand-checked against the USDA descriptions;
-# the long tail is resolved by the fuzzy matcher.
-FDC_CURATED: dict[str, int] = {
-    "cream cheese": 173418,
-    "cottage cheese": 172179,
-    "ricotta": 170851,
-    "ricotta cheese": 170851,
-    "sour cream": 171257,
-    "yogurt": 171284,
-    "yoghurt": 171284,
-    "plain yogurt": 171284,
-    "greek yogurt": 171284,
-    "buttermilk": 170874,
-    "heavy cream": 170859,
-    "heavy whipping cream": 170859,
-    "whipping cream": 170859,
-    "light cream": 170857,
-    "half and half": 171255,
-    "whole milk": 171265,
-    "evaporated milk": 171276,
-    "condensed milk": 171275,
-    "sweetened condensed milk": 171275,
-    "honey": 169640,
-    "maple syrup": 169661,
-    "corn syrup": 168837,
-    "dark corn syrup": 168836,
-    "molasses": 168820,
-    "golden syrup": 168837,
-    "brown sugar": 168833,
-    "powdered sugar": 169656,
-    "confectioners sugar": 169656,
-    "icing sugar": 169656,
-    "granulated sugar": 169655,
-    "white sugar": 169655,
-    "caster sugar": 169655,
-    "chocolate": 170271,
-    "dark chocolate": 170273,
-    "semisweet chocolate": 167976,
-    "chocolate chips": 167976,
-    "cocoa": 169593,
-    "cocoa powder": 169593,
-    "unsweetened cocoa": 169593,
-    "dutch cocoa": 169593,
-    "oats": 173904,
-    "rolled oats": 173904,
-    "quick oats": 173904,
-    "old fashioned oats": 173904,
-    "pecans": 169424,
-    "pecan": 169424,
-    "walnuts": 170186,
-    "walnut": 170186,
-    "almonds": 170158,
-    "almond": 170158,
-    "raisins": 168165,
-    "raisin": 168165,
-    "dates": 171726,
-    "dried cranberries": 171723,
-    "cranberries": 171723,
-    "coconut": 170170,
-    "unsweetened coconut": 170170,
-    "shredded coconut": 170170,
-    "banana": 173944,
-    "bananas": 173944,
-    "pumpkin": 168450,
-    "canned pumpkin": 168450,
-    "pumpkin puree": 168450,
-    "carrot": 168568,
-    "carrots": 168568,
-    "zucchini": 168469,
-    "applesauce": 167772,
-    "lemon juice": 167747,
-    "lime juice": 167747,
-    "orange juice": 169098,
-    "tomato sauce": 169074,
-    "mustard": 172234,
-    "dijon mustard": 172234,
-    "yellow mustard": 172234,
-    "ketchup": 168556,
-    "catsup": 168556,
-    "soy sauce": 172473,
-    "worcestershire sauce": 171610,
-    "worcestershire": 171610,
-    "vinegar": 172237,
-    "distilled vinegar": 172237,
-    "white vinegar": 172237,
-    "balsamic vinegar": 172237,
-    "cider vinegar": 172237,
-    "red wine vinegar": 172237,
-    "rice vinegar": 172237,
-    "chicken broth": 171542,
-    "chicken stock": 171542,
-    "beef broth": 171542,
-    "beef stock": 171542,
-    "vegetable broth": 171542,
-    "wine": 171872,
-    "red wine": 171872,
-    "white wine": 171872,
-    "beer": 168746,
-    "coffee": 171881,
-    "cornstarch": 169698,
-    "corn starch": 169698,
-    "marshmallows": 167995,
-    "cheddar cheese": 173414,
-    "cheddar": 173414,
-    "mozzarella": 170845,
-    "mozzarella cheese": 170845,
-    "parmesan": 171247,
-    "parmesan cheese": 171247,
-}
+# The nutrient -> part transform, the starch food categories, the sodium -> salt
+# conversion and the curated head -> USDA-description map live with the lookup
+# code in ``src/preprocess/reference.py``; only the fuzzy matcher's tuning knobs
+# are decisions and stay here.
 
 # Fuzzy-matcher tuning (token-overlap scoring against FDC descriptions).
 FDC_FUZZY_CANDIDATE_CAP = 400   # stop growing the candidate set past this size
 FDC_FUZZY_SUBSET_BONUS = 0.5    # bonus when description tokens ⊆ head tokens
 FDC_FUZZY_MIN_SCORE = 0.4       # reject matches below this Jaccard-like score
 
-# Sodium -> salt conversion (Na x 2.5 = NaCl) and the trace-composition cutoff.
-FDC_SODIUM_TO_SALT = 2.5
-FDC_TRACE_CUTOFF = 1e-6
-
 # ══════════════════════════════════════════════════════════════════════════════
-# DENSITY — (amount, unit, ingredient) -> grams.  [STAGE 1]
+# DENSITY — (amount, unit, ingredient) -> grams: mass assumptions.  [STAGE 1]
 # ══════════════════════════════════════════════════════════════════════════════
-
-# Weight units, grams per unit.
-WEIGHT_UNIT_GRAMS = {
-    "g": 1.0,
-    "kg": 1000.0,
-    "oz": 28.3495,
-    "lb": 453.592,
-}
-
-# Volume units, cups per unit.
-VOLUME_UNIT_CUPS = {
-    "cup": 1.0,
-    "tbsp": 1.0 / 16.0,
-    "tsp": 1.0 / 48.0,
-    "ml": 1.0 / 236.588,
-    "l": 1000.0 / 236.588,
-    "pt": 2.0,
-    "qt": 4.0,
-    "gal": 16.0,
-}
+#
+# Unit conversion factors, per-name grams-per-cup tables and container net
+# weights live with the matching code in ``src/preprocess/density.py``; the
+# per-category density assumptions (things a reader might re-tune) stay here.
 
 # Fallback grams-per-cup per part category.
 DEFAULT_GRAMS_PER_CUP = {
@@ -416,89 +275,10 @@ EGG_GRAMS = {"whole": 50.0, "yolk": 17.0, "white": 33.0}
 STICK_OF_BUTTER_GRAMS = 113.0
 YEAST_PACKET_GRAMS = 7.0
 
-# Name-first grams-per-cup for ingredients whose mass is split across parts
-# (dairy, syrups, chocolate, moist produce). Order matters: more specific
-# substrings first; checked before the category defaults.
-NAME_DENSITY: dict[str, float] = {
-    "peanut butter": 258.0,
-    "almond butter": 250.0,
-    "cream cheese": 232.0,
-    "cottage cheese": 226.0,
-    "ricotta": 246.0,
-    "mascarpone": 220.0,
-    "sour cream": 230.0,
-    "condensed milk": 306.0,
-    "evaporated milk": 252.0,
-    "ice cream": 148.0,
-    "half and half": 242.0,
-    "whipping cream": 238.0,
-    "heavy cream": 238.0,
-    "whipped cream": 120.0,
-    "cream": 238.0,
-    "coconut milk": 240.0,
-    "honey": 340.0,
-    "maple syrup": 315.0,
-    "molasses": 330.0,
-    "corn syrup": 330.0,
-    "golden syrup": 330.0,
-    "syrup": 330.0,
-    "agave": 310.0,
-    "chocolate": 170.0,
-    "cocoa": 118.0,
-    "pecan": 100.0,
-    "walnut": 100.0,
-    "almond": 100.0,
-    "peanut": 130.0,
-    "pumpkin": 245.0,
-    "banana": 225.0,
-    "applesauce": 245.0,
-    "tomato": 245.0,
-    "zucchini": 220.0,
-    "carrot": 225.0,
-    "raisins": 145.0,
-    "dates": 175.0,
-    "cranberries": 130.0,
-    "coconut": 90.0,
-    "oats": 80.0,
-    "cornstarch": 128.0,
-    "breadcrumbs": 100.0,
-    "cheese": 110.0,
-    "marshmallows": 60.0,
-    "mayonnaise": 230.0,
-    "ketchup": 240.0,
-    "mustard": 250.0,
-}
-
-# Default net weights (grams) for container/package units with unknown mass.
-# (unit, name-substring) -> grams, checked in order (most specific first).
-CONTAINER_OVERRIDES: list[tuple[str, str, float]] = [
-    ("can", "tomato paste", 170.0),
-    ("can", "tomato sauce", 425.0),
-    ("can", "tomato", 411.0),
-    ("can", "pumpkin", 425.0),
-    ("can", "evaporated milk", 354.0),
-    ("can", "condensed milk", 397.0),
-    ("can", "beans", 439.0),
-    ("can", "soup", 305.0),
-    ("can", "coconut milk", 400.0),
-    ("jar", "salsa", 454.0),
-    ("jar", "spaghetti sauce", 680.0),
-    ("jar", "pasta sauce", 680.0),
-    ("jar", "peanut butter", 462.0),
-    ("jar", "jam", 340.0),
-    ("jar", "jelly", 340.0),
-    ("jar", "preserves", 340.0),
-    ("pkg", "cream cheese", 226.0),
-    ("pkg", "gelatin", 7.0),
-    ("pkg", "yeast", 7.0),
-    ("container", "yogurt", 170.0),
-    ("container", "sour cream", 454.0),
-]
-
-CONTAINER_DEFAULTS = {
-    "can": 400.0,
-    "jar": 500.0,
-}
+# Micro-quantities (a pinch ≈ 1/16 tsp; a dash ≈ 2 pinches). Only ever
+# reaches the salt/leavener functional parts.
+PINCH_GRAMS = 0.4
+DASH_GRAMS = 0.8
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SIGNIFICANCE — which ingredients contribute to the ratio.  [STAGE 1]
@@ -512,6 +292,16 @@ SIGNIFICANCE_GRAMS_MIN = 2.0    # absolute floor in grams
 
 # Parts that bypass the mass threshold (powerful at small amounts).
 FUNCTIONAL_PARTS = frozenset({"leavener", "salt", "yeast"})
+
+# Lines whose quantity is a cooking medium or post-bake decoration — not part
+# of the baked structure ("1 cup vegetable oil (for frying)", "1/2 cup
+# powdered sugar, for dusting"): parsed and recorded in the interim file, but
+# excluded from the ratio and from the significance mass shares. A line
+# escapes the exclusion when the phrase follows an extra-amount word
+# ("2 1/2 cups flour, plus extra for dusting" — the main amount is the
+# recipe's structural flour).
+NONSTRUCTURAL_PHRASES = ("for frying", "for greasing", "for dusting")
+NONSTRUCTURAL_EXTRA_WORDS = ("additional", "extra", "plus", "more")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # FILTERS — from-scratch / baked-goods exclusion.  [STAGE 1]
@@ -670,66 +460,6 @@ TOPPING_CONTAINER_KEYWORDS = (
     "roll",
     "bar",
 )
-
-# ══════════════════════════════════════════════════════════════════════════════
-# PARSING — ingredient-line vocabulary.  [STAGE 1]
-# ══════════════════════════════════════════════════════════════════════════════
-
-# Preparation/quantity descriptors stripped from the head (moved to `props`).
-# Compositional modifiers ("brown", "powdered", "whole wheat", "unsweetened",
-# "self-rising", "skim", "heavy", "sour", ...) are intentionally NOT listed here.
-PARSE_PREP_PROPS = frozenset({
-    "chopped", "minced", "diced", "sliced", "grated", "shredded", "crushed",
-    "melted", "softened", "beaten", "divided", "optional", "peeled", "drained",
-    "rinsed", "sifted", "packed", "halved", "quartered", "cubed", "julienned",
-    "mashed", "pureed", "ground", "finely", "roughly", "thinly", "coarsely",
-    "firmly", "lightly", "well", "seeded", "cored", "trimmed", "washed",
-    "toasted", "thawed", "cooked", "boneless", "skinless", "lean", "frozen",
-    "canned", "fresh", "dried", "extra", "virgin", "room", "temperature", "to",
-    "taste", "large", "medium", "small", "unseasoned", "seasoned", "prepared",
-    "smoked", "unsalted", "salted", "plain", "nonfat", "reduced", "low",
-})
-
-# Multi-component recipes (a coffee cake = streusel + filling + batter) keep
-# their section headers as quantity-less lines in the flattened ingredient
-# list ("Streusel Topping", "Cream Cheese Filling", "for the glaze:").
-PARSE_COMPONENT_KIND_RE = (
-    r"toppings?|fillings?|streusel|crusts?|batters?|glazes?|icings?"
-    r"|frostings?|doughs?|mixtures?|layers?|coatings?|ganache|drizzles?|crumbs?"
-)
-
-# Sections whose ingredients never bake into the crumb (they are spread on
-# after baking or are pure decorations): their mass must not be pooled into
-# the batter's ratio. Everything else (streusel, filling, crust, dough, ...)
-# bakes with the recipe and stays pooled.
-PARSE_NONBAKED_KINDS = frozenset({
-    "glaze", "glazes", "icing", "icings", "frosting", "frostings",
-    "ganache", "drizzle", "drizzles", "coating", "coatings",
-})
-
-# Stray unit/measure words that leak into the name when the amount carries a
-# parenthetical size ("1 (8 oz.) pkg. cream cheese" -> head "cream cheese").
-PARSE_UNIT_WORDS = frozenset({
-    "pkg", "package", "packages", "packet", "packets", "can", "jar", "bottle",
-    "bottles", "box", "boxes", "bag", "bags", "container", "containers",
-    "stick", "sticks", "envelope", "envelopes", "dash", "pinch", "drop",
-    "drops", "slice", "slices", "piece", "pieces",
-})
-
-# RecipeNLG's ingredient strings sometimes lose the slash in a leading
-# fraction: "1/4 cup" appears as "14 cup", "1/2 teaspoon" as "12 teaspoon",
-# "3/4 cup" as "34 cup". Reconstruction table + the units it applies to
-# (weight units like oz/g are left alone — "12 oz" is a real amount).
-MANGLED_FRACTIONS: dict[str, tuple[int, int]] = {
-    "12": (1, 2), "13": (1, 3), "14": (1, 4), "18": (1, 8),
-    "23": (2, 3), "34": (3, 4), "38": (3, 8),
-    "58": (5, 8), "78": (7, 8), "116": (1, 16),
-}
-MANGLE_RECONSTRUCT_UNITS = frozenset({"cup", "tbsp", "tsp", "pt", "qt", "gal", "lb"})
-
-# Plausibility window for un-mangling a bare number into a fraction.
-MANGLE_PLAUSIBLE_MIN = 10
-MANGLE_PLAUSIBLE_MAX = 999
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAG TAXONOMY — independent labels from Food.com tags.  [STAGE 1]
@@ -951,6 +681,20 @@ CLUSTER_SEED = 0
 VIZ_SAMPLE_MAX = 20000
 SILHOUETTE_SAMPLE_MAX = 20000
 
+# Robustness baselines (src/analysis/robustness.py): permutation null and
+# bootstrap resample count; 0 disables them.
+ROBUSTNESS_B = 100
+
+# Upper k for the k sweep (silhouette + ARI per k; k = number of tag classes
+# is an assumption the sweep tests, not a fact).
+K_SWEEP_MAX = 12
+
+# Which decomposition feeds stage 2: "structural" (the shipped simplex) or
+# "full" (pools add-ins — the losing convention from the comparison that chose
+# structural). Full mode reads the sidecar grams stage 1 writes to
+# data/interim/full_grams.csv; the committed dataset stays structural.
+DECOMPOSITION_MODE = "structural"
+
 # Seeds used anywhere randomness could leak in (determinism).
 RANDOM_SEED = 0
 
@@ -959,6 +703,13 @@ RANDOM_SEED = 0
 # restricts further ("strong" | "medium" | None).
 DROP_WEAK_TIER = True
 MIN_TAG_CONFIDENCE: str | None = None
+
+# Per-class extreme-recipe diagnostics: for each tag class, flag this many
+# recipes farthest from the class centroid (Aitchison distance) — usually
+# processing errors worth inspecting (see src/analysis/validate.py). The
+# pseudocount keeps |log-ratio| deviations finite at structural zeros.
+EXTREMES_PER_CLASS = 10
+EXTREMES_LOG_EPS = 0.005
 
 # ══════════════════════════════════════════════════════════════════════════════
 # VALIDATION — diagnostic tables written by stage 2 (src/analysis/validate.py).

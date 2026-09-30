@@ -1,7 +1,6 @@
 """Tests for the Food.com tag taxonomy (``src.tags``)."""
 
 import config
-
 from src.preprocess import tags
 
 

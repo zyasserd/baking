@@ -4,8 +4,8 @@ import numpy as np
 import pytest
 
 import config
-from src.analysis import folds, pca
-from src.analysis.coda import closure, clr, ilr, multiplicative_replacement
+from src.analysis import pca
+from src.analysis.coda import closure, clr, multiplicative_replacement
 
 
 def _clr(n=300):

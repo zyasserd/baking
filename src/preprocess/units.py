@@ -11,7 +11,20 @@ from __future__ import annotations
 
 import re
 
-import config
+# RecipeNLG's ingredient strings sometimes lose the slash in a leading
+# fraction: "1/4 cup" appears as "14 cup", "1/2 teaspoon" as "12 teaspoon",
+# "3/4 cup" as "34 cup". Reconstruction table + the units it applies to
+# (weight units like oz/g are left alone — "12 oz" is a real amount).
+_MANGLED_FRACTIONS: dict[str, tuple[int, int]] = {
+    "12": (1, 2), "13": (1, 3), "14": (1, 4), "18": (1, 8),
+    "23": (2, 3), "34": (3, 4), "38": (3, 8),
+    "58": (5, 8), "78": (7, 8), "116": (1, 16),
+}
+_RECONSTRUCT_UNITS = frozenset({"cup", "tbsp", "tsp", "pt", "qt", "gal", "lb"})
+
+# Plausibility window for un-mangling a bare number into a fraction.
+_MANGLE_PLAUSIBLE_MIN = 10
+_MANGLE_PLAUSIBLE_MAX = 999
 
 _NUMBER = r"(?:\d+\s+\d+\s*/\s*\d+|\d+\s*/\s*\d+|\d+\.\d+|\d+)"
 
@@ -31,6 +44,7 @@ _UNIT = (
     r"|quarts?|qts?"
     r"|sticks?"
     r"|grams?|g"
+    r"|pinch(?:es)?|dash(?:es)?"
     r"|cups?|c"
     r"|cans?|jars?"
 )
@@ -62,21 +76,14 @@ _UNIT_CANON = {
     "qt": "qt", "quart": "qt", "quarts": "qt",
     "gal": "gal", "gallon": "gal", "gallons": "gal",
     "stick": "stick", "sticks": "stick",
+    "pinch": "pinch", "pinches": "pinch",
+    "dash": "dash", "dashes": "dash",
     "pkg": "pkg", "package": "pkg", "packages": "pkg", "packet": "pkg", "packets": "pkg",
     "envelope": "envelope", "envelopes": "envelope",
     "can": "can", "cans": "can",
     "jar": "jar", "jars": "jar",
     "container": "container", "containers": "container",
 }
-
-_NO_QUANTITY_PHRASES = (
-    "to taste",
-    "as needed",
-    "as required",
-    "for frying",
-    "for dusting",
-    "for greasing",
-)
 
 _LEADING_WORDS = re.compile(
     r"\A(?:about|approx\.?|approximately|around|scant|generous|heaping|level)\s+",
@@ -115,15 +122,6 @@ def _canon(unit: str | None) -> str | None:
     return _UNIT_CANON.get(unit)
 
 
-# RecipeNLG's ingredient strings sometimes lose the slash in a leading
-# fraction: "1/4 cup" appears as "14 cup", "1/2 teaspoon" as "12 teaspoon",
-# "3/4 cup" as "34 cup". Reconstruct the fraction when the mangled 2/3-digit
-# token maps to a standard cooking fraction *and* is followed by an imperial
-# volume unit (or pound). Weight units (oz/g/ml) are left alone because whole
-# amounts like "12 oz" and "16 oz" are real and common there.
-_FRACTION_MANGLE = config.MANGLED_FRACTIONS
-_RECONSTRUCT_UNITS = frozenset(config.MANGLE_RECONSTRUCT_UNITS)
-
 # Quantity ranges: "2 -3 cups", "1 1/2 - 2 cups", "1 to 2 cups". The range's
 # second number and the unit would otherwise leak into the ingredient head.
 _RANGE_RE = re.compile(
@@ -136,10 +134,10 @@ _RANGE_RE = re.compile(
 def _unmangle(value: float) -> float | None:
     """Undo a mangled fraction ("12" -> 0.5, "34" -> 0.75) when plausible."""
     if value != int(value) or not (
-        config.MANGLE_PLAUSIBLE_MIN <= value <= config.MANGLE_PLAUSIBLE_MAX
+        _MANGLE_PLAUSIBLE_MIN <= value <= _MANGLE_PLAUSIBLE_MAX
     ):
         return None
-    frac = _FRACTION_MANGLE.get(str(int(value)))
+    frac = _MANGLED_FRACTIONS.get(str(int(value)))
     if frac is None:
         return None
     return frac[0] / frac[1]
@@ -176,8 +174,8 @@ def _range_values(a: float, b: float) -> tuple[float, float]:
     return b, b
 
 
-def _parse_range(s: str) -> tuple[float | None, str | None, int] | None:
-    """Match a leading range "1 1/2 - 2 cups"; return (midpoint, unit, end)."""
+def _parse_range(s: str) -> tuple[float, float, str | None, int] | None:
+    """Match a leading range "1 1/2 - 2 cups"; return (low, high, unit, end)."""
     m = _RANGE_RE.match(s)
     if not m:
         return None
@@ -186,8 +184,7 @@ def _parse_range(s: str) -> tuple[float | None, str | None, int] | None:
     if a is None or b is None:
         return None
     a, b = _range_values(a, b)
-    unit = _canon(m.group("unit"))
-    return (a + b) / 2.0, unit, m.end()
+    return min(a, b), max(a, b), _canon(m.group("unit")), m.end()
 
 _MANGLED_FRACTION_RE = re.compile(r"\A\s*(\d{2,3})\s+([A-Za-z]+)\.?")
 _MANGLED_MIXED_RE = re.compile(r"\A\s*(\d+)\s+(\d{2,3})\s+([A-Za-z]+)\.?")
@@ -198,7 +195,7 @@ def _normalize_mangled_fraction(s: str) -> str:
     # Mixed number first: "1 23 cups" -> "1 2/3 cups".
     m = _MANGLED_MIXED_RE.match(s)
     if m:
-        frac = _FRACTION_MANGLE.get(m.group(2))
+        frac = _MANGLED_FRACTIONS.get(m.group(2))
         if frac is not None and _canon(m.group(3)) in _RECONSTRUCT_UNITS:
             num, den = frac
             return f"{m.group(1)} {num}/{den} {m.group(3)}{s[m.end():]}"
@@ -206,7 +203,7 @@ def _normalize_mangled_fraction(s: str) -> str:
     # Bare leading fraction: "14 cup" -> "1/4 cup".
     m = _MANGLED_FRACTION_RE.match(s)
     if m:
-        frac = _FRACTION_MANGLE.get(m.group(1))
+        frac = _MANGLED_FRACTIONS.get(m.group(1))
         if frac is not None and _canon(m.group(2)) in _RECONSTRUCT_UNITS:
             num, den = frac
             return f"{num}/{den} {m.group(2)}{s[m.end():]}"
@@ -214,27 +211,31 @@ def _normalize_mangled_fraction(s: str) -> str:
     return s
 
 
-def parse_ingredient_amount(s: str | None) -> tuple[float | None, str | None]:
-    """Return ``(amount, canonical_unit)`` for the leading quantity.
+def parse_amount_span(
+    s: str | None,
+) -> tuple[float | None, str | None, float | None, float | None]:
+    """Return ``(amount, unit, low, high)`` for the leading quantity.
 
-    ``amount`` is a float (fractions/mixed numbers resolved); ``unit`` is a
-    canonical key such as ``"cup"``, ``"tbsp"``, ``"oz"``, ``"g"``. Both are
-    ``None`` when nothing parseable is present.
+    ``amount`` is a float (fractions/mixed numbers resolved) — for a range
+    (``"1 1/2 - 2 cups"``) it is the midpoint, and ``low``/``high`` carry the
+    resolved endpoints (mangled fractions un-mangled: ``"14-12 cup"`` spans
+    0.25–0.5). For a non-range quantity the span is ``None, None``. ``unit`` is
+    a canonical key such as ``"cup"``, ``"tbsp"``, ``"oz"``, ``"g"``;
+    ``amount`` and ``unit`` are both ``None`` when nothing parseable is
+    present. A no-quantity phrase ("salt to taste") rejects the line only
+    when NO amount parses — a quantified line with a trailing phrase
+    (``"1 cup vegetable oil (for frying)"``) keeps its amount.
     """
     if not s:
-        return None, None
+        return None, None, None, None
 
     s = _strip_abbrev_periods(s.strip())
-
-    lowered = s.lower()
-    if any(phrase in lowered for phrase in _NO_QUANTITY_PHRASES):
-        return None, None
-
     s = _LEADING_WORDS.sub("", s)
 
     rng = _parse_range(s)
     if rng:
-        return rng[0], rng[1]
+        low, high, unit, _ = rng
+        return (low + high) / 2.0, unit, low, high
 
     s = _normalize_mangled_fraction(s)
 
@@ -244,15 +245,22 @@ def parse_ingredient_amount(s: str | None) -> tuple[float | None, str | None]:
         size = _parse_number(m.group("size"))
         if size is None:
             size = 0.0
-        unit = _canon(m.group("unit"))
-        return count * size, unit
+        return count * size, _canon(m.group("unit")), None, None
 
     m = _AMOUNT_UNIT_RE.match(s)
-    if not m:
-        return None, None
+    if m:
+        amount = _parse_number(m.group("num"))
+        return amount, _canon(m.group("unit")), None, None
 
-    amount = _parse_number(m.group("num"))
-    unit = _canon(m.group("unit"))
+    # Nothing parseable — a genuine no-quantity line ("salt to taste") or
+    # junk: no amount either way. The phrase tables only matter downstream
+    # (props/head stripping), never for the amount.
+    return None, None, None, None
+
+
+def parse_ingredient_amount(s: str | None) -> tuple[float | None, str | None]:
+    """Return ``(amount, canonical_unit)`` for the leading quantity."""
+    amount, unit, _, _ = parse_amount_span(s)
     return amount, unit
 
 
@@ -260,10 +268,13 @@ def strip_amount(s: str | None) -> str:
     """Remove the leading quantity/unit, returning the remaining name text."""
     if not s:
         return ""
-    stripped = _strip_abbrev_periods(s.strip())
+    # Un-mangle fractions ("1 12 cups oil") BEFORE matching, exactly like
+    # parse_ingredient_amount — otherwise the amount parses correctly but the
+    # name keeps the mangled digits ("12 cups oil").
+    stripped = _normalize_mangled_fraction(_strip_abbrev_periods(s.strip()))
     rng = _parse_range(stripped)
     if rng:
-        return stripped[rng[2]:].strip()
+        return stripped[rng[3]:].strip()
     m = _AMOUNT_UNIT_RE.match(stripped)
     if m:
         return stripped[m.end():].strip()

@@ -8,7 +8,8 @@ into one flat CSV per food:
     fdc_id,description,category,water_g,protein_g,fat_g,carb_g,fiber_g,sugar_g,
     ash_g,sodium_mg
 
-All nutrient columns are per 100 g. Nutrient IDs live in ``config.FDC_NUTRIENT_IDS``.
+All nutrient columns are per 100 g. The nutrient-id -> column mapping lives in
+this module (``_NUTRIENT_IDS``).
 There is no network access and no extraction here — both are nix's job
 (flake.nix).
 """
@@ -20,6 +21,19 @@ import os
 
 import config
 
+# FDC nutrient ids -> SR Legacy column names (per 100 g). USDA's identifiers,
+# not a tunable.
+_NUTRIENT_IDS = {
+    1051: "water_g",
+    1003: "protein_g",
+    1004: "fat_g",
+    1005: "carb_g",
+    1079: "fiber_g",
+    2000: "sugar_g",
+    1007: "ash_g",
+    1093: "sodium_mg",
+}
+
 
 def _read_csv(path: str) -> list[dict]:
     with open(path, newline="", encoding="utf-8", errors="replace") as fh:
@@ -27,7 +41,7 @@ def _read_csv(path: str) -> list[dict]:
 
 
 def build(tables_dir: str = config.FDC_TABLES_DIR, out_path: str = config.FDC_REFERENCE_CSV) -> str:
-    nutrient_ids = config.FDC_NUTRIENT_IDS
+    nutrient_ids = _NUTRIENT_IDS
 
     foods = {r["fdc_id"]: r for r in _read_csv(os.path.join(tables_dir, "food.csv"))}
     categories = {r["id"]: r["description"] for r in _read_csv(os.path.join(tables_dir, "food_category.csv"))}

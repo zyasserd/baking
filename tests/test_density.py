@@ -2,6 +2,7 @@
 
 import pytest
 
+import config
 from src.preprocess import density
 
 
@@ -42,3 +43,16 @@ def test_container_name_aware():
 
 def test_container_unknown_pkg():
     assert density.to_grams("milk", 1.0, "pkg", "mystery mix") is None
+
+def test_pinch_dash_grams():
+    assert density.to_grams("salt", 1.0, "pinch", "salt") == config.PINCH_GRAMS
+    assert density.to_grams("salt", 2.0, "dash", "salt") == 2 * config.DASH_GRAMS
+
+
+def test_to_grams_with_basis_paths():
+    assert density.to_grams_with_basis("flour", 2.0, "cup", "flour") == (250.0, "volume:category")
+    assert density.to_grams_with_basis("fat", 0.5, "cup", "olive oil") == (109.0, "volume:name")
+    assert density.to_grams_with_basis("spice", 2.0, "cup", "cinnamon") == (400.0, "volume:fallback")
+    assert density.to_grams_with_basis("flour", 1.0, "kg", "flour")[1] == "weight"
+    assert density.to_grams_with_basis("salt", 1.0, "pinch", "salt")[1] == "pinch"
+    assert density.to_grams_with_basis("salt", 1.0, None, "salt") == (None, "")

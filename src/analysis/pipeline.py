@@ -26,7 +26,31 @@ from sklearn.metrics import silhouette_score
 import config
 
 from ..preprocess import parts
-from . import coda, cluster, folds, pca, validate, visualize
+from . import cluster, coda, folds, pca, quality, robustness, validate
+from . import report as html_report
+
+
+def _apply_full_mode(df: pd.DataFrame) -> pd.DataFrame:
+    """Swap the structural gram/proportion columns for the pooled add-in ones.
+
+    Reads the ``full_grams`` sidecar stage 1 wrote (see config
+    DECOMPOSITION_MODE) — the losing convention from the comparison that chose
+    the structural decomposition, kept reproducible rather than folklore.
+    """
+    if not os.path.exists(config.FULL_GRAMS_CSV):
+        raise SystemExit(
+            f"DECOMPOSITION_MODE=full needs {config.FULL_GRAMS_CSV} — "
+            "re-run scripts/preprocess.py once"
+        )
+    grams_cols = [f"{p}_g" for p in config.INGREDIENT_PARTS]
+    full = pd.read_csv(config.FULL_GRAMS_CSV, dtype={"recipe_id": str})
+    df = df.copy()
+    df["recipe_id"] = df["recipe_id"].astype(str)
+    df = df.drop(columns=grams_cols + parts.proportion_columns())
+    df = df.merge(full, on="recipe_id", how="left")
+    df[grams_cols] = df[grams_cols].fillna(0.0)
+    df[parts.proportion_columns()] = parts.proportions(df)
+    return df
 
 
 def analyze(df: pd.DataFrame, outdir: str) -> dict:
@@ -46,19 +70,26 @@ def analyze(df: pd.DataFrame, outdir: str) -> dict:
     loadings_df = pca.loading_table(loadings, config.ANALYSIS_PARTS)
     variance.to_csv(os.path.join(outdir, "variance.csv"), index=False)
     loadings_df.to_csv(os.path.join(outdir, "loadings.csv"))
-    visualize.scree(outdir, eigvals)
 
     interpretations = pca.interpret_components(loadings, config.ANALYSIS_PARTS)
 
     inliers = cluster.detect_outliers(ilr)
+    validate.write_envelope_outliers(df, ilr, inliers, outdir)
     df = df[inliers].reset_index(drop=True)
     clr = clr[inliers]
     ilr = ilr[inliers]
     comp = comp[inliers].reset_index(drop=True)
     scores = scores[inliers]
 
+    # Diagnostics: per class, the recipes farthest from the class centroid —
+    # candidates for processing errors, written with inspection evidence.
+    validate.write_extremes(df, ilr, outdir)
+
     arch_names, arch_clr = folds.archetype_clr()
     nearest, distance = folds.nearest_archetype(clr, arch_names, arch_clr)
+    # df feeds the HTML hover (via the viz subset); comp is the CSV export.
+    df["nearest_archetype"] = nearest
+    df["aitchison_distance"] = distance
     comp["nearest_archetype"] = nearest
     comp["aitchison_distance"] = distance
     comp.to_csv(os.path.join(outdir, "compositions.csv"), index=False)
@@ -74,31 +105,17 @@ def analyze(df: pd.DataFrame, outdir: str) -> dict:
         idx = np.sort(rng.choice(n, size=config.VIZ_SAMPLE_MAX, replace=False))
         viz_df = df.iloc[idx].reset_index(drop=True)
         viz_scores = scores[idx]
-        viz_ilr = ilr[idx]
     else:
         viz_df = df
         viz_scores = scores
-        viz_ilr = ilr
 
     arch_scores = pca.project(arch_clr, mean, loadings)
-    visualize.pca_biplot(outdir, viz_scores, loadings, viz_df, arch_scores, arch_names)
-    visualize.ternary(outdir, viz_df)
-    visualize.class_pc1_strip(outdir, viz_scores, viz_df)
 
     tetra = folds.tetrahedron_matrix(viz_df)
     tetra_coords = folds.barycentric_3d(tetra)
     arch_tetra = folds.barycentric_3d(folds.tetrahedron_archetypes())
-    visualize.simplex_3d(outdir, tetra_coords, viz_df, arch_tetra, arch_names)
 
-    viz_scores2 = viz_scores[:, :2]
     viz_scores3 = viz_scores[:, : config.N_PCS_CLUSTER]
-    arch2 = arch_scores[:, :2]
-    arch3 = arch_scores[:, : config.N_PCS_CLUSTER]
-    visualize.pca_scatter_2d(
-        outdir, viz_scores2, viz_df, arch2, arch_names,
-        axis_labels=(interpretations[0], interpretations[1]),
-    )
-    visualize.pca_scatter_3d(outdir, viz_scores3, viz_df, arch3, arch_names)
 
     metrics: dict = {"n": int(len(df)), "pc1_order": pc1_order, "ari": None, "silhouette": None}
 
@@ -114,13 +131,18 @@ def analyze(df: pd.DataFrame, outdir: str) -> dict:
 
     table = cluster.confusion_table(viz_df["tag_coarse"].to_numpy(), clusters)
     table.to_csv(os.path.join(outdir, "tag_confusion.csv"))
-    visualize.tag_confusion(outdir, table)
-    visualize.cluster_scatter(outdir, viz_scores2, viz_df, clusters)
 
     true = viz_df["tag_coarse"].to_numpy()
     metrics["ari"] = cluster.ari(true, clusters)
     metrics["silhouette"] = silhouette_score(
         viz_scores3, true, sample_size=min(len(viz_scores3), config.SILHOUETTE_SAMPLE_MAX)
+    )
+    metrics.update(robustness.write_reports(outdir, viz_scores3, true, clusters, clr))
+
+    # One self-contained HTML page replaces every standalone figure.
+    html_report.write_html(
+        outdir, viz_df, viz_scores, arch_scores, arch_names, arch_tetra,
+        tetra_coords, clusters, table, variance, interpretations, metrics,
     )
     return metrics
 
@@ -146,6 +168,13 @@ def run(input_csv: str, outdir: str) -> dict:
     df, excluded = coda.load_recipes(input_csv)
     excluded.to_csv(os.path.join(outdir, "excluded_flourless.csv"), index=False)
     print(f"Loaded {len(df)} recipes ({len(excluded)} flourless rows excluded).")
+
+    # Standing data-quality report (unresolved-heads queue + basis shares).
+    quality.write_reports(outdir)
+
+    if config.DECOMPOSITION_MODE == "full":
+        df = _apply_full_mode(df)
+        print("Decomposition: FULL (add-ins pooled in)")
 
     # Diagnostics on the full dataset, before any filtering (see validate.py).
     validate.write_reports(df, outdir)

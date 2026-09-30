@@ -14,7 +14,9 @@ Per recipe:
    (``src.preprocess.density``), and — if *significant* (``src.preprocess.
    significance``) — decomposed into structural part weights from USDA SR Legacy
    (``src.preprocess.ingredients``): add-ins are zeroed, keeping only
-   flour/liquid/egg/fat/sugar + functional parts,
+   flour/liquid/egg/fat/sugar + functional parts. One exception: water-dominant
+   add-ins (moist produce acting as hydration) contribute their water to the
+   liquid part,
 4. non-baked sections (frosting, glaze, icing, ...) are skipped so decorations
    never pool into the batter's ratio,
 5. the structural grams fold into 5-part simplex proportions that sum to 1
@@ -64,8 +66,8 @@ _GRAM_COLUMNS = [f"{part}_g" for part in config.INGREDIENT_PARTS]
 _PROPORTION_COLUMNS = parts.proportion_columns()
 
 INTERIM_COLUMNS = (
-    ["recipe_id", "seq", "section", "raw", "head", "qty", "unit", "note", "grams",
-     "role", "primary_part", "significant"]
+    ["recipe_id", "seq", "section", "raw", "head", "qty", "qty_low", "qty_high",
+     "unit", "note", "grams", "grams_basis", "role", "primary_part", "significant"]
     + [f"{p}_p" for p in config.INGREDIENT_PARTS]
     + ["structural"]
 )
@@ -93,10 +95,30 @@ def _literal_list(value: str) -> list[str] | None:
     return None
 
 
-def analyze_ingredients(ing_list: list[str]) -> tuple[list[dict], dict, int, float, bool]:
+def _nonstructural(line: str) -> bool:
+    """True for cooking-medium / decoration lines ("1 cup oil (for frying)").
+
+    The line's mass is parsed and recorded, but it never enters the ratio.
+    Escapes the exclusion when the phrase follows an extra-amount word
+    ("flour, plus extra for dusting" — the main amount is structural).
+    """
+    low = (line or "").lower()
+    for phrase in config.NONSTRUCTURAL_PHRASES:
+        i = low.find(phrase)
+        if i < 0:
+            continue
+        window = low[max(0, i - 30):i]
+        if not any(w in window for w in config.NONSTRUCTURAL_EXTRA_WORDS):
+            return True
+    return False
+
+
+def analyze_ingredients(
+    ing_list: list[str],
+) -> tuple[list[dict], dict, dict, int, float, bool]:
     """Decompose one recipe's ingredient list.
 
-    Returns ``(interim_rows, structural_grams, n_significant,
+    Returns ``(interim_rows, structural_grams, full_grams, n_significant,
     significant_mass_frac, dropped_nonbaked)``.
 
     Each ingredient is parsed, converted to grams, and — if significant or
@@ -104,9 +126,13 @@ def analyze_ingredients(ing_list: list[str]) -> tuple[list[dict], dict, int, flo
     vector is used internally to pick each ingredient's primary part (for the
     density lookup) and its role, but only structural grams accumulate into the
     recipe; the interim rows carry the full per-ingredient proportions.
+    Cooking-medium / decoration lines (``_nonstructural``) are recorded but
+    never enter the ratio or the significance shares. ``full_grams`` pools the
+    whole vectors including add-ins (the losing "full" convention — written to
+    a sidecar so the comparison stays reproducible).
     """
     interim: list[dict] = []
-    items: list[tuple[float, dict, str, bool]] = []
+    items: list[tuple[float, dict, str, bool, bool]] = []
     in_nonbaked = False
     dropped_nonbaked = False
     section = ""
@@ -128,11 +154,12 @@ def analyze_ingredients(ing_list: list[str]) -> tuple[list[dict], dict, int, flo
             continue
         vec_full, role = ingredients.resolve(p.head)
         primary = ingredients.primary_part(vec_full)
-        grams = density.to_grams(primary, p.qty, p.unit, p.head, p.note)
+        grams, grams_basis = density.to_grams_with_basis(primary, p.qty, p.unit, p.head, p.note)
         if grams is None or grams <= 0:
             continue
         functional = primary in config.FUNCTIONAL_PARTS
-        items.append((grams, vec_full, role, functional))
+        purpose = _nonstructural(ing_str)
+        items.append((grams, vec_full, role, functional, purpose))
         interim.append({
             "recipe_id": None,
             "seq": None,
@@ -140,41 +167,63 @@ def analyze_ingredients(ing_list: list[str]) -> tuple[list[dict], dict, int, flo
             "raw": p.raw,
             "head": p.head,
             "qty": p.qty,
+            "qty_low": p.qty_low,
+            "qty_high": p.qty_high,
             "unit": p.unit,
             "note": p.note,
             "grams": grams,
+            "grams_basis": grams_basis,
             "role": role,
             "primary_part": primary or "",
             "significant": None,  # fixed below
-            "structural": 1 if role == "base" else 0,
+            "structural": 0,  # fixed below (base, or water-dominant add-in)
             "_vec": vec_full,
             "_functional": functional,
         })
 
-    total = sum(g for g, *_ in items)
+    total = sum(g for g, _, _, _, purpose in items if not purpose)
     struct = {col: 0.0 for col in _GRAM_COLUMNS}
+    full_struct = {col: 0.0 for col in _GRAM_COLUMNS}
     n_sig = 0
     sig_mass = 0.0
 
-    for row, (grams, vec_full, role, functional) in zip(interim, items):
-        sig = significance.qualifies(grams, total, functional)
-        row["significant"] = int(sig)
+    for row, (grams, vec_full, role, functional, purpose) in zip(interim, items):
+        sig = 0 if purpose else int(significance.qualifies(grams, total, functional))
+        row["significant"] = sig
         # Full USDA part proportions (closed over the tracked parts).
         vec_sum = sum(vec_full.values())
         for part in config.INGREDIENT_PARTS:
             row[f"{part}_p"] = round(vec_full.get(part, 0.0) / vec_sum, 6) if vec_sum > 0 else 0.0
-        if not sig or not vec_full:
+        if purpose or not sig or not vec_full:
             continue
         n_sig += 1
         sig_mass += grams
+        # "Full" convention: every significant ingredient's whole vector pools
+        # in, add-ins included (comparison sidecar only).
+        for part, frac in vec_full.items():
+            col = f"{part}_g"
+            if col in full_struct:
+                full_struct[col] += grams * vec_full[part]
+        watery_addin = (
+            role == "addin"
+            and vec_sum > 0
+            and vec_full.get("water", 0.0) / vec_sum > config.ADDIN_WATER_DOMINANT_SHARE
+        )
+        row["structural"] = 1 if (role == "base" or watery_addin) and not purpose else 0
+        if purpose:
+            continue
         if role == "base":
             for part, frac in vec_full.items():
                 col = f"{part}_g"
                 if col in struct:
                     struct[col] += grams * vec_full[part]
+        elif watery_addin:
+            # Moist produce acting as the recipe's hydration: only its water
+            # enters the ratio (see config ADDIN_WATER_DOMINANT_SHARE).
+            struct["water_g"] += grams * vec_full["water"]
 
     mass_frac = sig_mass / total if total > 0 else 0.0
-    return interim, struct, n_sig, mass_frac, dropped_nonbaked
+    return interim, struct, full_struct, n_sig, mass_frac, dropped_nonbaked
 
 
 def load_food_meta(path: str) -> dict[int, dict]:
@@ -244,6 +293,7 @@ def build(
 
     rows: list[dict] = []
     interim_rows: list[dict] = []
+    full_rows: list[dict] = []
     stats = {
         "total": 0,
         "food_rows": 0,
@@ -296,7 +346,7 @@ def build(
                 stats["excluded"] += 1
                 continue
 
-            interim, struct, n_sig, sig_frac, dropped_nonbaked = analyze_ingredients(ing_list)
+            interim, struct, full_struct, n_sig, sig_frac, dropped_nonbaked = analyze_ingredients(ing_list)
             if dropped_nonbaked:
                 stats["nonbaked_components"] += 1
             if struct["flour_g"] <= 0:
@@ -307,6 +357,8 @@ def build(
                 row["recipe_id"] = str(food_id)
                 row["seq"] = i
             interim_rows.extend(interim)
+            full_rows.append({"recipe_id": str(food_id),
+                              **{col: round(full_struct[col], 1) for col in _GRAM_COLUMNS}})
 
             # Fold the structural grams into 5-part proportions (sum to 1).
             grams_df = pd.DataFrame([struct])
@@ -350,5 +402,10 @@ def build(
     interim_df = pd.DataFrame(interim_rows, columns=[c for c in INTERIM_COLUMNS])
     os.makedirs(os.path.dirname(interim_path) or ".", exist_ok=True)
     interim_df.to_csv(interim_path, index=False)
+
+    full_path = config.FULL_GRAMS_CSV
+    full_df = pd.DataFrame(full_rows, columns=["recipe_id"] + _GRAM_COLUMNS)
+    os.makedirs(os.path.dirname(full_path) or ".", exist_ok=True)
+    full_df.to_csv(full_path, index=False)
 
     return stats

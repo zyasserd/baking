@@ -1,6 +1,5 @@
 """Tests for the mass-significance rule."""
 
-import pytest
 
 from src.preprocess import significance
 

@@ -100,3 +100,61 @@ def test_mangled_fraction_ranges():
 def test_package_size_fraction():
     assert units.parse_ingredient_amount("1 (10 5/8 oz) box pasta") == (10.625, "oz")
     assert units.parse_ingredient_amount("2 (3 1/2 oz.) pkg. candy")[0] == 7.0
+
+
+def test_range_span_endpoints():
+    amount, unit, low, high = units.parse_amount_span("1 1/2 - 2 cups flour")
+    assert amount == pytest.approx(1.75)
+    assert unit == "cup"
+    assert low == pytest.approx(1.5)
+    assert high == pytest.approx(2.0)
+
+
+def test_range_span_mangled_endpoints():
+    # "1/4 - 1/2 cup" arrives slash-less as "14-12 cup".
+    _, _, low, high = units.parse_amount_span("14-12 cup unsalted butter")
+    assert low == pytest.approx(0.25)
+    assert high == pytest.approx(0.5)
+
+
+def test_span_none_for_non_range():
+    _, _, low, high = units.parse_amount_span("2 cups flour")
+    assert low is None and high is None
+    _, _, low, high = units.parse_amount_span("1/2 tsp salt")
+    assert low is None and high is None
+
+
+def test_span_none_for_unparseable():
+    amount, unit, low, high = units.parse_amount_span("salt to taste")
+    assert amount is None and unit is None and low is None and high is None
+
+
+def test_parse_ingredient_amount_delegates():
+    assert units.parse_ingredient_amount("1 1/2 - 2 cups flour") == (1.75, "cup")
+
+
+def test_strip_amount_mangled_mixed_number():
+    # "1 12 cups oil" is a mangled "1 1/2 cups oil": the amount parses as 1.5
+    # cups, so the name must not keep the mangled digits.
+    assert units.strip_amount("1 12 cups oil") == "oil"
+    assert units.strip_amount("1 34 cups cream cheese") == "cream cheese"
+
+
+def test_quantified_line_with_trailing_phrase_keeps_amount():
+    # "for frying"/"to taste" must not kill a line that HAS an amount.
+    assert units.parse_ingredient_amount("1 cup vegetable oil (for frying)") == (1.0, "cup")
+    assert units.parse_ingredient_amount("1/2 tsp salt, to taste") == (0.5, "tsp")
+    assert units.parse_ingredient_amount("1 cup powdered sugar, for dusting")[0] == 1.0
+
+
+def test_genuine_no_quantity_lines_stay_none():
+    assert units.parse_ingredient_amount("salt to taste") == (None, None)
+    assert units.parse_ingredient_amount("fresh ground black pepper") == (None, None)
+    assert units.parse_ingredient_amount("oil, for deep frying") == (None, None)
+
+
+def test_pinch_dash_are_units():
+    amount, unit = units.parse_ingredient_amount("1 pinch salt")
+    assert (amount, unit) == (1.0, "pinch")
+    amount, unit = units.parse_ingredient_amount("2 dashes nutmeg")
+    assert (amount, unit) == (2.0, "dash")

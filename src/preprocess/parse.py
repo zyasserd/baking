@@ -10,9 +10,6 @@ An ingredient line like ``"1/2 cup firmly packed brown sugar"`` or
 modifiers kept), ``props`` are the preparation descriptors, and ``note`` carries
 parenthetical size hints / qualifiers. Amount/unit parsing (fractions, mangled
 slashes, package sizes) is delegated to ``src.preprocess.units``.
-
-The word tables and the section-header regex are parameters — see the PARSING
-section of ``config``.
 """
 
 from __future__ import annotations
@@ -20,23 +17,62 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-import config
-
 from . import units
 
-_PREP_PROPS = config.PARSE_PREP_PROPS
-_UNIT_WORDS = config.PARSE_UNIT_WORDS
-_NONBAKED_KINDS = config.PARSE_NONBAKED_KINDS
+# Preparation/quantity descriptors stripped from the head (moved to `props`).
+# Compositional modifiers ("brown", "powdered", "whole wheat", "unsweetened",
+# "self-rising", "skim", "heavy", "sour", ...) are intentionally NOT listed here.
+_PREP_PROPS = frozenset({
+    "chopped", "minced", "diced", "sliced", "grated", "shredded", "crushed",
+    "melted", "softened", "beaten", "divided", "optional", "peeled", "drained",
+    "rinsed", "sifted", "packed", "halved", "quartered", "cubed", "julienned",
+    "mashed", "pureed", "ground", "finely", "roughly", "thinly", "coarsely",
+    "firmly", "lightly", "well", "seeded", "cored", "trimmed", "washed",
+    "toasted", "thawed", "cooked", "boneless", "skinless", "lean", "frozen",
+    "canned", "fresh", "dried", "extra", "virgin", "room", "temperature", "to",
+    "taste", "large", "medium", "small", "unseasoned", "seasoned", "prepared",
+    "smoked", "unsalted", "salted", "plain", "nonfat", "reduced", "low",
+    # Water temperature descriptors ("boiling water") — deliberately NOT "hot"
+    # ("hot cross buns" is a dish, not a prep step).
+    "boiling", "lukewarm", "warm",
+    # NER leakage: connective/adverb fragments left in heads ("butter cut into",
+    # "dates pitted organic into", "freshly pecorino romano cheese",
+    # "slightly egg whites").
+    "into", "cut", "freshly", "slightly",
+})
 
-_PAREN_RE = re.compile(r"\(([^)]*)\)")
-_WORD_RE = re.compile(r"[a-z0-9]+")
+# Stray unit/measure words that leak into the name when the amount carries a
+# parenthetical size ("1 (8 oz.) pkg. cream cheese" -> head "cream cheese").
+_UNIT_WORDS = frozenset({
+    "pkg", "package", "packages", "packet", "packets", "can", "jar", "bottle",
+    "bottles", "box", "boxes", "bag", "bags", "container", "containers",
+    "stick", "sticks", "envelope", "envelopes", "drop",
+    "drops", "slice", "slices", "piece", "pieces",
+})
 
 # Multi-component recipes (a coffee cake = streusel + filling + batter) keep
 # their section headers as quantity-less lines in the flattened ingredient
 # list ("Streusel Topping", "Cream Cheese Filling", "for the glaze:").
+_COMPONENT_KIND_RE = (
+    r"toppings?|fillings?|streusel|crusts?|batters?|glazes?|icings?"
+    r"|frostings?|doughs?|mixtures?|layers?|coatings?|ganache|drizzles?|crumbs?"
+)
+
+# Sections whose ingredients never bake into the crumb (they are spread on
+# after baking or are pure decorations): their mass must not be pooled into
+# the batter's ratio. Everything else (streusel, filling, crust, dough, ...)
+# bakes with the recipe and stays pooled.
+_NONBAKED_KINDS = frozenset({
+    "glaze", "glazes", "icing", "icings", "frosting", "frostings",
+    "ganache", "drizzle", "drizzles", "coating", "coatings",
+})
+
+_PAREN_RE = re.compile(r"\(([^)]*)\)")
+_WORD_RE = re.compile(r"[a-z0-9]+")
+
 _COMPONENT_RE = re.compile(
     r"^(?:for\s+(?:the|a)\s+)?(?:[a-z][a-z' ]{0,30}?\s+)?"
-    r"(?P<kind>" + config.PARSE_COMPONENT_KIND_RE + r")"
+    r"(?P<kind>" + _COMPONENT_KIND_RE + r")"
     r"\s*:?\s*$",
     re.IGNORECASE,
 )
@@ -50,6 +86,10 @@ class Parsed:
     props: list[str] = field(default_factory=list)
     note: str | None = None
     raw: str = ""
+    # Quantity ranges ("1 1/2 - 2 cups"): the resolved endpoints; ``qty`` is
+    # the midpoint. Both None when the quantity is not a range.
+    qty_low: float | None = None
+    qty_high: float | None = None
 
 
 def _resolve_or(name: str) -> str:
@@ -105,7 +145,7 @@ def component_header(line: str) -> str | None:
 
 def parse_ingredient(s: str) -> Parsed:
     raw = s or ""
-    qty, unit = units.parse_ingredient_amount(raw)
+    qty, unit, qty_low, qty_high = units.parse_amount_span(raw)
     name = units.strip_amount(raw).strip()
 
     # Parentheticals (size hints, qualifiers) -> note.
@@ -126,4 +166,6 @@ def parse_ingredient(s: str) -> Parsed:
         props=props,
         note="; ".join(notes) if notes else None,
         raw=raw,
+        qty_low=qty_low,
+        qty_high=qty_high,
     )

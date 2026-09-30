@@ -26,7 +26,6 @@
           ps.pandas
           ps.scipy
           ps.scikit-learn
-          ps.matplotlib
           ps.plotly
           ps.pytest
         ]);
@@ -95,7 +94,10 @@
         packages.fdc-tables = fdc-tables;
 
         devShells.default = pkgs.mkShell {
-          packages = [ pythonEnv ];
+          packages = [
+            pythonEnv
+            pkgs.ruff
+          ];
 
           shellHook = ''
             echo "baking-ratios dev shell — Python ${python.version}"

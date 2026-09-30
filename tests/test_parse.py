@@ -81,3 +81,25 @@ def test_leading_of_after_container_word():
     assert p.head == "refrigerated pastry"
     # mid-name "of" is kept (multi-word rules depend on it)
     assert parse.parse_ingredient("1 tsp cream of tartar").head == "cream of tartar"
+
+
+def test_range_endpoints_carried_on_parsed():
+    p = parse.parse_ingredient("1 1/2 - 2 cups sliced strawberries")
+    assert p.qty_low == 1.5
+    assert p.qty_high == 2.0
+
+
+def test_non_range_has_no_span():
+    p = parse.parse_ingredient("2 cups flour")
+    assert p.qty_low is None and p.qty_high is None
+
+
+def test_temperature_props_stripped():
+    assert parse.parse_ingredient("1 cup boiling water").head == "water"
+    assert parse.parse_ingredient("1 cup lukewarm water").head == "water"
+    assert parse.parse_ingredient("2/3 cups warm water").head == "water"
+
+
+def test_hot_is_not_a_prop():
+    # "hot cross buns" is a dish name, not a prep descriptor.
+    assert "hot cross" in parse.parse_ingredient("6 hot cross buns").head
