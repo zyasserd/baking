@@ -15,9 +15,11 @@ import hashlib
 
 DATASET = "data/processed/recipes_simplex.csv"
 
-# 2026-09: after soymilk/plant-milk base fix, nuts curation, phrase-check
-# reorder, non-structural purpose lines, pinch/dash masses, produce-water rule.
-GOLDEN_SHA256 = "e8fafbdc7e06e2d0a8a4a3da459ad57f7b65261d8d3ea02c47e549aa2b56d7af"
+# 2026-09: after the canonical-singular fuzzy fix (plural variants no longer
+# inflate the union on the description side) and the 50-head curation batch
+# from the standing unresolved-heads queue (chocolate chips, jams, produce,
+# cereals, crisco/bisquick pins).
+GOLDEN_SHA256 = "eb7bab673a38232de8575ff307e18611e61b8a18970c82715140205f548a04bf"
 
 
 def test_golden_dataset_unchanged():

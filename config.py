@@ -141,10 +141,12 @@ INGREDIENT_SINGLE_PINS: list[tuple[str, str]] = [
     ("polenta", "flour"),
     ("masa", "flour"),
     ("semolina", "flour"),
+    ("bisquick", "flour"),
     ("sugar", "sugar"),
     ("butter", "fat"),
     ("margarine", "fat"),
     ("shortening", "fat"),
+    ("crisco", "fat"),
     ("oil", "fat"),
     ("lard", "fat"),
     ("ghee", "fat"),
@@ -655,39 +657,20 @@ TETRAHEDRON_SOURCES: list[list[str]] = [
 ]
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ANALYSIS — PCA, outliers, clustering, subsampling.  [STAGE 2]
+# ANALYSIS — outliers, clustering, subsampling.  [STAGE 2]
 # ══════════════════════════════════════════════════════════════════════════════
 
 # Multiplicative zero-replacement: delta = ZERO_REPLACEMENT_FACTOR * min(positive).
 ZERO_REPLACEMENT_DELTA = 0.5
 
-# PC1's sign is pinned to this direction so it always reads rich > lean
-# (eigenvector signs from eigendecomposition are arbitrary and can flip between
-# runs). The vector is +sugar in ANALYSIS_PARTS order.
-PC1_ORIENT_PART = "sugar"
-
-# Clustering runs in the top-3 log-ratio PCs: the first three components
-# separate the tag classes measurably better than two, and PC4 only adds noise.
-N_PCS_CLUSTER = 3
-
 # Outliers: robust Mahalanobis (EllipticEnvelope) tail fraction and seed.
 OUTLIER_CONTAMINATION = 0.01
 
-# Clustering method and seed. k is the number of tag classes.
-CLUSTER_METHOD = "kmeans"
-CLUSTER_SEED = 0
 
-# Subsample cap for figures/clustering, and the silhouette sample cap.
+# Subsample cap for figures/clustering, and the separation-silhouette sample
+# cap (both for speed; results are stable past a few thousand recipes).
 VIZ_SAMPLE_MAX = 20000
 SILHOUETTE_SAMPLE_MAX = 20000
-
-# Robustness baselines (src/analysis/robustness.py): permutation null and
-# bootstrap resample count; 0 disables them.
-ROBUSTNESS_B = 100
-
-# Upper k for the k sweep (silhouette + ARI per k; k = number of tag classes
-# is an assumption the sweep tests, not a fact).
-K_SWEEP_MAX = 12
 
 # Which decomposition feeds stage 2: "structural" (the shipped simplex) or
 # "full" (pools add-ins — the losing convention from the comparison that chose
@@ -710,29 +693,3 @@ MIN_TAG_CONFIDENCE: str | None = None
 # pseudocount keeps |log-ratio| deviations finite at structural zeros.
 EXTREMES_PER_CLASS = 10
 EXTREMES_LOG_EPS = 0.005
-
-# ══════════════════════════════════════════════════════════════════════════════
-# VALIDATION — diagnostic tables written by stage 2 (src/analysis/validate.py).
-# ══════════════════════════════════════════════════════════════════════════════
-
-# Title keywords used to spot-check tag correctness per class (independent of
-# the tag-derived labels).
-VALIDATION_TITLE_KEYWORDS: dict[str, tuple[str, ...]] = {
-    "cookie": ("cookie", "cookies", "shortbread", "biscotti", "snickerdoodle"),
-    "cake": ("cake", "cupcake"),
-    "pie_pastry": ("pie", "tart", "pastry", "croissant", "strudel", "danish",
-                   "empanada", "baklava", "turnover", "strudel"),
-    "bread": ("bread", "loaf", "baguette", "boule", "brioche", "challah",
-              "focaccia", "sourdough", "rolls", "buns"),
-    "quick_bread": ("muffin", "muffins", "scone", "scones", "banana bread",
-                    "cornbread", "quick bread", "coffee cake"),
-    "brownies": ("brownie", "brownies", "blondie", "blondies"),
-    "batter": ("pancake", "pancakes", "waffle", "waffles", "crepe", "crepes"),
-    "dessert_other": ("cobbler", "crisp", "crumble", "mousse", "pudding"),
-}
-
-# Correlations are reported per class; skip classes with fewer rows than this.
-VALIDATION_MIN_ROWS = 20
-
-# Number of random sample rows for eyeballing in src/analysis/validate.py.
-VALIDATION_SAMPLE_ROWS = 8

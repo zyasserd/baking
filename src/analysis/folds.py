@@ -28,16 +28,6 @@ def _closed_archetypes() -> np.ndarray:
     return coda.multiplicative_replacement(P)
 
 
-def archetype_clr() -> tuple[np.ndarray, np.ndarray]:
-    """Return (names, CLR) for the book archetypes.
-
-    Uses the same closure + zero-replacement as the data so distances are
-    comparable.
-    """
-    P = _closed_archetypes()
-    return np.array(list(config.ARCHETYPES.keys())), coda.clr(P)
-
-
 def archetype_ilr() -> tuple[np.ndarray, np.ndarray]:
     """Return (names, ILR) for the book archetypes."""
     P = _closed_archetypes()
@@ -45,26 +35,26 @@ def archetype_ilr() -> tuple[np.ndarray, np.ndarray]:
 
 
 def nearest_archetype(
-    clr: np.ndarray,
+    coords: np.ndarray,
     names: np.ndarray | None = None,
-    arch_clr: np.ndarray | None = None,
+    arch_coords: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Assign each CLR row to its nearest book archetype.
+    """Assign each coordinate row to its nearest book archetype.
 
     Returns (archetype names, Aitchison distance to the nearest archetype).
-    Aitchison distance between two compositions is the Euclidean norm of their
-    CLR difference.
+    Aitchison distance is the Euclidean norm in any orthonormal log-ratio
+    coordinate system (CLR or ILR — isometric transforms).
     """
-    if names is None or arch_clr is None:
-        names, arch_clr = archetype_clr()
-    clr = np.asarray(clr, dtype=float)
-    arch_clr = np.asarray(arch_clr, dtype=float)
+    if names is None or arch_coords is None:
+        names, arch_coords = archetype_ilr()
+    coords = np.asarray(coords, dtype=float)
+    arch_coords = np.asarray(arch_coords, dtype=float)
 
     # (n, k, D) differences -> (n, k) squared distances
-    diff = clr[:, None, :] - arch_clr[None, :, :]
+    diff = coords[:, None, :] - arch_coords[None, :, :]
     dist2 = np.einsum("nkd,nkd->nk", diff, diff)
     idx = dist2.argmin(axis=1)
-    return names[idx], np.sqrt(dist2[np.arange(clr.shape[0]), idx])
+    return names[idx], np.sqrt(dist2[np.arange(coords.shape[0]), idx])
 
 
 _TETRA_SOURCES = config.TETRAHEDRON_SOURCES

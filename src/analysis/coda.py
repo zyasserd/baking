@@ -65,6 +65,17 @@ def clr(P: np.ndarray) -> np.ndarray:
     return log_P - log_P.mean(axis=1, keepdims=True)
 
 
+def _pivot_psi(D: int) -> np.ndarray:
+    """(D-1, D) orthonormal pivot-balance basis: part k vs the geometric mean
+    of the parts after it."""
+    psi = np.zeros((D - 1, D))
+    for k in range(D - 1):
+        coef = np.sqrt((D - k - 1) / (D - k))
+        psi[k, k] = coef
+        psi[k, k + 1:] = -coef / (D - k - 1)
+    return psi
+
+
 def ilr(P: np.ndarray, psi: np.ndarray | None = None) -> np.ndarray:
     """Isometric log-ratio transform (rows -> orthonormal R^(D-1) balances).
 
@@ -75,7 +86,7 @@ def ilr(P: np.ndarray, psi: np.ndarray | None = None) -> np.ndarray:
         z_k = sqrt((D-k-1) / (D-k)) * log( x_k / g(x_{k+1}, ..., x_{D-1}) )
 
     Euclidean distance in this space equals the Aitchison distance, so it is
-    the right coordinate system for PCA and clustering on the simplex.
+    the right coordinate system for clustering on the simplex.
     """
     P = np.asarray(P, dtype=float)
     if np.any(P <= 0):
@@ -99,14 +110,20 @@ def ilr(P: np.ndarray, psi: np.ndarray | None = None) -> np.ndarray:
             )
         return Z
 
-    log_P = np.log(P)
-    Z = np.zeros((P.shape[0], D - 1))
-    for k in range(D - 1):
-        # log of geometric mean of the trailing parts
-        gm = log_P[:, k + 1 :].mean(axis=1)
-        coef = np.sqrt((D - k - 1) / (D - k))
-        Z[:, k] = coef * (log_P[:, k] - gm)
-    return Z
+    return np.log(P) @ _pivot_psi(D).T
+
+
+def ilr_inverse(Z: np.ndarray) -> np.ndarray:
+    """Inverse of the default ILR: balances -> simplex proportions.
+
+    The pivot-balance basis is orthonormal, so the CLR vector is the balances
+    carried back through the basis transpose; exponentiating and closing gives
+    the composition. Used to map statistics computed in ILR space (class
+    centroids) back onto the simplex for display.
+    """
+    Z = np.asarray(Z, dtype=float)
+    psi = _pivot_psi(Z.shape[1] + 1)
+    return closure(np.exp(Z @ psi))
 
 
 def load_recipes(path: str) -> tuple[pd.DataFrame, pd.DataFrame]:

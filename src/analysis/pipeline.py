@@ -6,13 +6,15 @@ row per recipe with structural part grams and 5-part simplex proportions
 Food.com tag classes (``tag_coarse``). The book ratios are used only as
 reference archetypes, never as labels.
 
-Analysis runs in Aitchison geometry (CLR/ILR — see ``src.analysis.coda``):
-log-ratio PCA, robust outlier elimination, clustering vs the tag classes
-(ARI + confusion), and the class distribution along PC1 (the "rich vs lean"
-continuum). Validation diagnostics (labels vs titles, estimated mass vs
-nutrition) are written alongside the results — see ``validate.write_reports``.
-Every parameter lives in ``config`` (ANALYSIS section); the entry point takes
-no tuning flags.
+The tag classes are DESCRIBED in ratio space, not predicted: recipes are
+placed as balances of the simplex (flour/liquid/egg/fat/sugar — ILR, see
+``src.analysis.coda``), far-out parse errors are gated out, and the classes
+are summarized by a hand-picked manual axis (richness = fat + sugar share,
+sorted by distribution mode), per-class centroids in the simplexes, and their
+separation (mean silhouette of the tag labels; ~0 = the continuum finding).
+No clustering, no statistical components. Suspect-recipe diagnostics
+(``validate.py``) are internal CSVs, not report content. Every parameter
+lives in ``config`` (ANALYSIS section); the entry point takes no tuning flags.
 """
 
 from __future__ import annotations
@@ -26,7 +28,7 @@ from sklearn.metrics import silhouette_score
 import config
 
 from ..preprocess import parts
-from . import cluster, coda, folds, pca, quality, robustness, validate
+from . import coda, folds, outliers, quality, validate
 from . import report as html_report
 
 
@@ -54,39 +56,24 @@ def _apply_full_mode(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def analyze(df: pd.DataFrame, outdir: str) -> dict:
-    # Recipes -> simplex proportions (already closed by stage 1) -> log ratios.
+    # Recipes -> simplex proportions (already closed by stage 1) -> balances.
     P = df[parts.proportion_columns()].to_numpy(dtype=float)
     P = coda.multiplicative_replacement(coda.closure(P))
-    clr = coda.clr(P)
     ilr = coda.ilr(P)
     comp = df.copy()
 
-    # Pin PC1's sign to the sugar direction so it always reads rich > lean
-    # (eigenvector signs from the eigendecomposition are arbitrary).
-    orient = np.zeros(len(config.ANALYSIS_PARTS))
-    orient[config.ANALYSIS_PARTS.index(config.PC1_ORIENT_PART)] = 1.0
-    scores, eigvals, loadings, mean = pca.pca(clr, orient=orient)
-    variance = pca.variance_table(eigvals)
-    loadings_df = pca.loading_table(loadings, config.ANALYSIS_PARTS)
-    variance.to_csv(os.path.join(outdir, "variance.csv"), index=False)
-    loadings_df.to_csv(os.path.join(outdir, "loadings.csv"))
-
-    interpretations = pca.interpret_components(loadings, config.ANALYSIS_PARTS)
-
-    inliers = cluster.detect_outliers(ilr)
+    inliers = outliers.detect_outliers(ilr)
     validate.write_envelope_outliers(df, ilr, inliers, outdir)
     df = df[inliers].reset_index(drop=True)
-    clr = clr[inliers]
     ilr = ilr[inliers]
     comp = comp[inliers].reset_index(drop=True)
-    scores = scores[inliers]
 
-    # Diagnostics: per class, the recipes farthest from the class centroid —
-    # candidates for processing errors, written with inspection evidence.
+    # Internal diagnostics (CSV only): per class, the recipes farthest from
+    # the class centroid — the maintainer's loop for finding stage-1 bugs.
     validate.write_extremes(df, ilr, outdir)
 
-    arch_names, arch_clr = folds.archetype_clr()
-    nearest, distance = folds.nearest_archetype(clr, arch_names, arch_clr)
+    arch_names, arch_ilr = folds.archetype_ilr()
+    nearest, distance = folds.nearest_archetype(ilr, arch_names, arch_ilr)
     # df feeds the HTML hover (via the viz subset); comp is the CSV export.
     df["nearest_archetype"] = nearest
     df["aitchison_distance"] = distance
@@ -94,55 +81,48 @@ def analyze(df: pd.DataFrame, outdir: str) -> dict:
     comp["aitchison_distance"] = distance
     comp.to_csv(os.path.join(outdir, "compositions.csv"), index=False)
 
-    pc1 = pd.DataFrame({"tag_coarse": df["tag_coarse"], "pc1": scores[:, 0]})
-    pc1_summary = pc1.groupby("tag_coarse")["pc1"].agg(mean="mean", std="std", count="size")
-    pc1_summary.to_csv(os.path.join(outdir, "class_pc1_summary.csv"))
-    pc1_order = tuple(pc1_summary.sort_values("mean").index)
+    # Manual axis (no statistical component): richness = fat + sugar share, in
+    # percent of the composition. The violin and the ordering sort by the
+    # distribution MODE (where the class bulges) — the mean sits in the skew tail.
+    rich = pd.DataFrame({
+        "tag_coarse": df["tag_coarse"],
+        "richness": (df["fat_p"] + df["sugar_p"]) * 100.0,
+    })
+    rich_summary = rich.groupby("tag_coarse")["richness"].agg(
+        mean="mean", std="std", count="size")
+    rich_summary["mode"] = [html_report.mode_estimate(rich.loc[rich["tag_coarse"] == cls, "richness"])
+                            for cls in rich_summary.index]
+    rich_summary.sort_values("mode").to_csv(
+        os.path.join(outdir, "class_richness_summary.csv"))
+    richness_order = tuple(rich_summary.sort_values("mode").index)
 
     n = len(df)
     if config.VIZ_SAMPLE_MAX > 0 and config.VIZ_SAMPLE_MAX < n:
         rng = np.random.default_rng(config.RANDOM_SEED)
         idx = np.sort(rng.choice(n, size=config.VIZ_SAMPLE_MAX, replace=False))
         viz_df = df.iloc[idx].reset_index(drop=True)
-        viz_scores = scores[idx]
+        viz_ilr = ilr[idx]
     else:
         viz_df = df
-        viz_scores = scores
-
-    arch_scores = pca.project(arch_clr, mean, loadings)
+        viz_ilr = ilr
 
     tetra = folds.tetrahedron_matrix(viz_df)
     tetra_coords = folds.barycentric_3d(tetra)
     arch_tetra = folds.barycentric_3d(folds.tetrahedron_archetypes())
 
-    viz_scores3 = viz_scores[:, : config.N_PCS_CLUSTER]
-
-    metrics: dict = {"n": int(len(df)), "pc1_order": pc1_order, "ari": None, "silhouette": None}
-
-    # Cluster in the top-3 log-ratio PCs (see config.N_PCS_CLUSTER); k is the
-    # number of tag classes.
-    n_clusters = int(df["tag_coarse"].nunique())
-    clusters = cluster.run_clustering(viz_scores3, n_clusters)
-    labels = {
-        "tag_coarse": viz_df["tag_coarse"].to_numpy(),
-        "tag_fine": viz_df["tag_fine"].to_numpy(),
-    }
-    cluster.write_outputs(outdir, viz_df, clusters, labels)
-
-    table = cluster.confusion_table(viz_df["tag_coarse"].to_numpy(), clusters)
-    table.to_csv(os.path.join(outdir, "tag_confusion.csv"))
-
+    # Tag-class separation in ratio space: mean silhouette of the tag labels
+    # over all recipes (no clustering involved; ~0 = the continuum finding).
     true = viz_df["tag_coarse"].to_numpy()
-    metrics["ari"] = cluster.ari(true, clusters)
-    metrics["silhouette"] = silhouette_score(
-        viz_scores3, true, sample_size=min(len(viz_scores3), config.SILHOUETTE_SAMPLE_MAX)
+    separation = silhouette_score(
+        viz_ilr, true, sample_size=min(len(viz_ilr), config.SILHOUETTE_SAMPLE_MAX)
     )
-    metrics.update(robustness.write_reports(outdir, viz_scores3, true, clusters, clr))
+
+    metrics: dict = {"n": int(len(df)), "richness_order": richness_order,
+                     "separation": separation}
 
     # One self-contained HTML page replaces every standalone figure.
     html_report.write_html(
-        outdir, viz_df, viz_scores, arch_scores, arch_names, arch_tetra,
-        tetra_coords, clusters, table, variance, interpretations, metrics,
+        outdir, viz_df, viz_ilr, arch_names, arch_tetra, tetra_coords, metrics,
     )
     return metrics
 
@@ -154,11 +134,10 @@ def report(df: pd.DataFrame, outdir: str) -> dict:
         print(f"  {name:<12} {count}")
 
     metrics = analyze(df, outdir)
-    print("\nClass ordering along PC1 (rich vs lean):")
-    for name in metrics["pc1_order"]:
+    print("\nClass ordering by richness (fat + sugar share), lean -> rich:")
+    for name in metrics["richness_order"]:
         print(f"  {name}")
-    print(f"\nARI vs tag_coarse: {metrics['ari']:.3f}")
-    print(f"Silhouette (vs tag classes): {metrics['silhouette']:.3f}")
+    print(f"\nTag-class separation (mean silhouette): {metrics['separation']:.3f}")
     return metrics
 
 
@@ -175,9 +154,6 @@ def run(input_csv: str, outdir: str) -> dict:
     if config.DECOMPOSITION_MODE == "full":
         df = _apply_full_mode(df)
         print("Decomposition: FULL (add-ins pooled in)")
-
-    # Diagnostics on the full dataset, before any filtering (see validate.py).
-    validate.write_reports(df, outdir)
 
     if config.DROP_WEAK_TIER:
         dropped = (df["tag_coarse"] == "dessert_other").sum()

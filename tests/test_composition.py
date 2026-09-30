@@ -94,18 +94,16 @@ def test_ilr_rejects_zeros():
         coda.ilr(np.array([[0.5, 0.5, 0.0, 0.0, 0.0]]))
 
 
-def test_archetype_clr_shape():
-    names, arch_clr = folds.archetype_clr()
+def test_archetype_ilr_shape():
+    names, arch_ilr = folds.archetype_ilr()
     assert names.shape == (len(config.ARCHETYPES),)
-    assert arch_clr.shape == (len(config.ARCHETYPES), 5)
-    np.testing.assert_allclose(arch_clr.sum(axis=1), 0.0, atol=1e-9)
+    assert arch_ilr.shape == (len(config.ARCHETYPES), 4)
 
 
 def test_nearest_archetype_exact_matches():
     df = _df()
     P = coda.multiplicative_replacement(coda.closure(parts.parts_matrix(df)))
-    clr = coda.clr(P)
-    nearest, distance = folds.nearest_archetype(clr)
+    nearest, distance = folds.nearest_archetype(coda.ilr(P))
     assert list(nearest) == ["bread", "cookie", "pound_cake"]
     # Archetype-exact recipes are at (near) zero Aitchison distance.
     np.testing.assert_allclose(distance, 0.0, atol=1e-6)
@@ -114,7 +112,7 @@ def test_nearest_archetype_exact_matches():
 def test_nearest_archetype_returns_nonnegative_distances():
     df = _df()
     P = coda.multiplicative_replacement(coda.closure(parts.parts_matrix(df)))
-    _, distance = folds.nearest_archetype(coda.clr(P))
+    _, distance = folds.nearest_archetype(coda.ilr(P))
     assert np.all(distance >= 0.0)
 
 

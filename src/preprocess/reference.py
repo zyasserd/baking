@@ -179,6 +179,52 @@ _CURATED_DESCRIPTIONS: dict[str, str] = {
     # for 453 rows). Pin to the generic blend.
     "nuts": 'Nuts, mixed nuts, dry roasted, with peanuts, without salt added',
     "mixed nuts": 'Nuts, mixed nuts, dry roasted, with peanuts, without salt added',
+    # Batch from the standing unresolved-heads queue (data_quality loop):
+    # chocolate-chip variants ("semisweet" is one token in USDA descriptions,
+    # "semi sweet" two in the recipes — token overlap cannot bridge it),
+    # canned/raw produce, jams, spices and cereals the fuzzy matcher misses.
+    "semi sweet chocolate chips": 'Candies, semisweet chocolate',
+    "butterscotch chips": 'Candies, butterscotch',
+    "mini chocolate chip": 'Candies, semisweet chocolate',
+    "miniature semisweet chocolate chips": 'Candies, semisweet chocolate',
+    "semisweet chocolate chunks": 'Candies, semisweet chocolate',
+    "semisweet chocolate morsels": 'Candies, semisweet chocolate',
+    "semisweet mini chocolate chips": 'Candies, semisweet chocolate',
+    "dark chocolate chips": 'Candies, chocolate, dark, NFS '
+        '(45-59% cacao solids 90%; 60-69% cacao solids 5%; 70-85% cacao solids 5%)',
+    "bittersweet chocolate": 'Chocolate, dark, 60-69% cacao solids',
+    "m m s chocolate candy": 'Candies, milk chocolate',
+    "toffee": 'Candies, toffee, prepared-from-recipe',
+    "raspberry jam": 'Jams and preserves',
+    "strawberry jam": 'Jams and preserves',
+    "jam": 'Jams and preserves',
+    "pineapple": 'Pineapple, raw, all varieties',
+    "pineapple undrained": 'Pineapple, canned, juice pack, solids and liquids',
+    "creamed corn": 'Corn, sweet, yellow, canned, cream style, regular pack',
+    "maraschino cherry": 'Maraschino cherries, canned, drained',
+    "candied cherry": 'Candied fruit',
+    "crystallized ginger": 'Candied fruit',
+    "nutmeg": 'Spices, nutmeg, ground',
+    "flax seed meal": 'Seeds, flaxseed',
+    "potato starch": 'Cornstarch',
+    "rice krispies": 'Cereals ready-to-eat, rice, puffed, fortified',
+    "all bran cereal": 'Wheat bran, crude',
+    "flaked coconut": 'Nuts, coconut meat, dried (desiccated), sweetened, flaked, packaged',
+    "desiccated coconut": 'Nuts, coconut meat, dried (desiccated), not sweetened',
+    "hazelnuts": 'Nuts, hazelnuts or filberts',
+    "pecan halves": 'Nuts, pecans, dry roasted, with salt added',
+    "sultana": 'Raisins, golden, seedless',
+    "sultanas": 'Raisins, golden, seedless',
+    "apple cider": 'Apple juice, canned or bottled, unsweetened, with added ascorbic acid',
+    "agave nectar": 'Sweetener, syrup, agave',
+    "cool whip": 'Whipped topping, frozen, low fat',
+    "baking cocoa": 'Cocoa, dry powder, unsweetened',
+    "raw zucchini": 'Squash, summer, zucchini, includes skin, frozen, unprepared',
+    "quick cooking oats": 'Cereals, oats, regular and quick, not fortified, dry',
+    "quick cooking rolled oats": 'Cereals, oats, regular and quick, not fortified, dry',
+    "old fashioned oatmeal": 'Cereals, oats, regular and quick, not fortified, dry',
+    "quick oatmeal": 'Cereals, oats, regular and quick, not fortified, dry',
+    "blended oatmeal": 'Cereals, oats, regular and quick, not fortified, dry',
 }
 
 # Stopwords dropped from both heads and FDC descriptions when matching.
@@ -200,6 +246,9 @@ _STOP = frozenset({
 
 _WORD_RE = re.compile(r"[a-z0-9]+")
 
+# Words whose naive "ies" -> "y" depluralization is wrong.
+_PLURAL_EXCEPTIONS = {"cookies": "cookie", "brownies": "brownie"}
+
 # Minimum description-token count for the subset bonus (see ``fuzzy``).
 _SUBSET_BONUS_MIN_TOKENS = 3
 
@@ -213,12 +262,24 @@ def _tokens(text: str) -> list[str]:
     return out
 
 
-def _variants(tokens: list[str]) -> set[str]:
-    """Tokens plus naive singulars, for fuzzy matching."""
-    out = set(tokens)
+def _canonical(tokens: list[str]) -> set[str]:
+    """Tokens mapped to singular forms — applied to BOTH match sides.
+
+    Keeping the plural alongside the singular (the earlier ``_variants``) made
+    descriptions contribute two tokens for one word ({banana, bananas}), so a
+    singular head ("ripe banana") paid a phantom union term and fell below the
+    match threshold while its plural form ("ripe bananas") passed.
+    """
+    out = set()
     for w in tokens:
-        if len(w) > 3 and w.endswith("s") and not w.endswith("ss") and not w.endswith("us"):
+        if w.endswith("ies"):
+            out.add(_PLURAL_EXCEPTIONS.get(w, w[:-3] + "y"))
+        elif w.endswith("oes"):
+            out.add(w[:-2])
+        elif len(w) > 3 and w.endswith("s") and not w.endswith(("ss", "us")):
             out.add(w[:-1])
+        else:
+            out.add(w)
     return out
 
 
@@ -243,7 +304,7 @@ class _Reference:
                 self._by_id[fid] = row
                 self._descriptions.append((fid, row["description"]))
                 self._by_description.setdefault(row["description"], []).append(fid)
-                toks = _variants(_tokens(row["description"]))
+                toks = _canonical(_tokens(row["description"])) 
                 self._desc_tokens[fid] = toks
                 for t in toks:
                     self._postings.setdefault(t, []).append(fid)
@@ -262,7 +323,7 @@ class _Reference:
 
     def fuzzy(self, head: str) -> dict[str, float] | None:
         self._load()
-        tok_set = _variants(_tokens(head))
+        tok_set = _canonical(_tokens(head))    
         if not tok_set:
             return None
 
