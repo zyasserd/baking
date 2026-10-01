@@ -1,0 +1,25 @@
+{
+  "parts": [
+    "flour",
+    "liquid",
+    "egg",
+    "fat",
+    "sugar"
+  ],
+  "proportion_columns": [
+    "flour_p",
+    "liquid_p",
+    "egg_p",
+    "fat_p",
+    "sugar_p"
+  ],
+  "stats": {
+    "excluded": 16909,
+    "flourless": 12004,
+    "food_rows": 499616,
+    "joined": 226864,
+    "kept": 31348,
+    "nonbaked_components": 1875,
+    "total": 2231142
+  }
+}

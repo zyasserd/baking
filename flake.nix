@@ -4,12 +4,12 @@
   # Two stages (see README):
 #   1. preprocess  scripts/preprocess.py — raw corpora -> preprocessed
 #                  per-recipe dataset (simplex proportions + tag labels)
-#   2. analysis    scripts/analyze.py    — dataset -> PCA, clustering,
-#                  figures, validation diagnostics, results
+#   2. analyze     scripts/analyze.py    — dataset -> the Aid (single-file
+#                  interactive page) + method diagnostics
   #
   # Every tunable parameter lives in config.py.
 
-  description = "Baking ratio analysis: dimensionality reduction on the ingredient simplex";
+  description = "Baking ratio analysis: describing Food.com tag classes on the ingredient simplex";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -26,7 +26,6 @@
           ps.pandas
           ps.scipy
           ps.scikit-learn
-          ps.plotly
           ps.pytest
         ]);
 
@@ -97,6 +96,12 @@
           packages = [
             pythonEnv
             pkgs.ruff
+            # The Aid's UI source is plain JS with no build step; qjs (QuickJS,
+            # ~1 MB, no toolchain) is the smoke-test runner: it syntax-parses
+            # every web/app file and executes the DOM-free modules (geo, state,
+            # search) in tests/test_web.js. A framework/bundler would add node
+            # to this shell for the same job.
+            pkgs.quickjs
           ];
 
           shellHook = ''

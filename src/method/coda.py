@@ -1,29 +1,16 @@
-"""Loading the preprocessed dataset and the compositional transforms.
+"""Compositional transforms: closure, zero replacement, CLR and ILR.
 
-Stage 1 writes per-recipe simplex proportions (``*_p`` columns summing to 1).
-This module loads and validates that dataset and provides the log-ratio
-transforms (closure, multiplicative zero-replacement, CLR, ILR) used by the
-analysis stage.
+Stage 1 writes per-recipe simplex proportions (``*_p`` columns summing to 1);
+the dataset contract lives in ``src.dataset`` (schema, validation, loading).
+This module provides the log-ratio transforms the method uses to place
+recipes as balances on the simplex.
 """
 
 from __future__ import annotations
 
 import numpy as np
-import pandas as pd
 
 import config
-
-from ..preprocess import parts
-
-# Gram columns kept as provenance (the structural decomposition).
-GRAM_COLUMNS = parts.GRAM_COLUMNS
-
-# Columns whose zeros must be replaced before the log-ratio transforms: the
-# six structural grams that fold into the five analysis parts (liquid = milk + water).
-CORE_COLUMNS = ["flour_g", "sugar_g", "fat_g", "egg_g", "milk_g", "water_g"]
-SIDE_COLUMNS = ["salt_g", "leavener_g", "yeast_g"]
-NUMERIC_COLUMNS = CORE_COLUMNS + SIDE_COLUMNS
-REQUIRED_COLUMNS = ["recipe_id", "name", "tag_coarse", "tag_fine"] + NUMERIC_COLUMNS
 
 
 def closure(X: np.ndarray) -> np.ndarray:
@@ -124,29 +111,3 @@ def ilr_inverse(Z: np.ndarray) -> np.ndarray:
     Z = np.asarray(Z, dtype=float)
     psi = _pivot_psi(Z.shape[1] + 1)
     return closure(np.exp(Z @ psi))
-
-
-def load_recipes(path: str) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Load and validate the preprocessed recipe dataset.
-
-    Returns (kept, excluded) where kept has flour_g > 0 and excluded has
-    flour_g == 0 (to be written out for later handling).
-    """
-    df = pd.read_csv(path)
-
-    missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
-    if missing:
-        raise ValueError(f"missing required columns: {missing}")
-
-    if df["recipe_id"].duplicated().any():
-        raise ValueError("recipe_id column contains duplicates")
-
-    if df[NUMERIC_COLUMNS].isna().any().any():
-        raise ValueError("numeric gram columns contain missing values")
-
-    if (df[NUMERIC_COLUMNS] < 0).any().any():
-        raise ValueError("numeric gram columns contain negative values")
-
-    kept = df[df["flour_g"] > 0].reset_index(drop=True)
-    excluded = df[df["flour_g"] == 0].reset_index(drop=True)
-    return kept, excluded

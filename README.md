@@ -25,9 +25,10 @@ config.py                  EVERY tunable parameter, in one commented file
 scripts/                   thin entry points (argparse + report printing
                            only — all logic lives in src/)
   preprocess.py            STAGE 1: raw corpora -> preprocessed dataset
-  analyze.py               STAGE 2: dataset -> all results (analysis +
-                           validation diagnostics under output/)
+  analyze.py               STAGE 2: dataset -> the Aid + method diagnostics
 src/
+  dataset.py               the data contract: schema, validation, loader —
+                           the only way either stage touches the dataset
   preprocess/              stage-1 library
     pipeline.py            the stage-1 pipeline (join -> parts -> dataset)
     parse.py units.py      ingredient line -> qty/unit/head
@@ -39,14 +40,18 @@ src/
     tags.py                Food.com tags -> class taxonomy
     significance.py        which ingredients count toward the ratio
     parts.py               grams -> 5-part simplex proportions
-  analysis/                stage-2 library
-    pipeline.py            the stage-2 analysis (class description in ratio space)
-    coda.py                load dataset, closure/CLR/ILR transforms
+  method/                  stage-2 science library
+    pipeline.py            outlier gate + class description in ratio space
+    coda.py                closure/CLR/ILR compositional transforms
     folds.py               book archetypes, tetrahedron fold
     outliers.py            robust Mahalanobis outlier gate
     validate.py            internal suspect-recipe diagnostics (CSV only)
     quality.py             data-quality report (density bases, unresolved heads)
-    report.py              the single self-contained HTML report
+  aid/                     the product builder: dataset -> data.js + packed HTML
+web/                       the Aid's UI source (plain JS, no build step;
+                           inlined into the packed HTML by stage 2)
+tests/test_web.js          JS smoke tests, executed by qjs (QuickJS, staged
+                           by flake.nix)
 data/
   raw/                     raw corpora (gitignored): nix-staged store
                            symlinks + the manual Kaggle download
@@ -54,17 +59,20 @@ data/
                            fdc_srlegacy.csv, ingredients.csv
   processed/               THE PREPROCESSED DATASET (committed)
     recipes_simplex.csv
+    provenance.json
 output/                    stage-2 results (gitignored)
 tests/                     pytest suite
 ```
 
-The two stages are deliberately separate: stage 1 knows nothing about
-analysis; stage 2 only reads the preprocessed dataset.
+The two stages are deliberately separate: stage 1 knows nothing about the
+method or the Aid; stage 2 only reads the preprocessed dataset through the
+`src/dataset.py` contract.
 
 ## Reproducibility
 
 - **Environment**: `nix develop -c python ...` — a pinned Python 3.13 with
-  numpy/pandas/scipy/scikit-learn/plotly. Nothing else is installed.
+  numpy/pandas/scipy/scikit-learn, plus ruff and QuickJS (`qjs`) for the
+  Aid's JS smoke tests. Nothing else is installed.
 - **Raw data**: fetched — and, for the USDA archive, unpacked — by `flake.nix`
   with pinned sha256 hashes (the hash *is* the artifact's identity; see the
   commented DATASETS section in the flake). The dev shell stages each dataset
@@ -87,7 +95,7 @@ analysis; stage 2 only reads the preprocessed dataset.
   there required removing two set-iteration dependencies in the USDA fuzzy
   matcher, whose results had silently depended on Python's per-process hash
   seed.) The stage-1 output is committed (`data/processed/recipes_simplex.csv`)
-  so the analysis stage is runnable without a 2.3 GB download.
+  so the later stages are runnable without a 2.3 GB download.
 - **Parameters**: everything tunable — taxonomy, decomposition rules, densities,
   thresholds, folds, seeds — lives in `config.py`, one commented file.
 
@@ -97,11 +105,17 @@ analysis; stage 2 only reads the preprocessed dataset.
 nix develop -c python scripts/preprocess.py     # ~4 min; writes data/processed/
 ```
 
-### Run the analysis
+### Build the Aid
 
 ```bash
-nix develop -c python scripts/analyze.py        # writes output/ (results + diagnostics)
+nix develop -c python scripts/analyze.py        # writes output/ (Aid + diagnostics)
 ```
+
+Open `output/bakers_aid.html` — it is self-contained and works offline over
+file://. To hack on the UI, edit `web/` and reload the page directly: the
+shell references `../output/aid/data.js` and the app files by relative path,
+so the dev loop needs no build step and no server. Rerun stage 2 only when
+the data changes.
 
 ## What the pipeline computes
 
@@ -144,41 +158,64 @@ because it is the project's main methodological decision:
   hydration) contribute their USDA water fraction to the liquid part; their
   remaining parts stay zeroed.
 
-Describing the classes with each gives class separation −0.007 (structural,
-the shipped pipeline) vs −0.018 (full, reproducible via `DECOMPOSITION_MODE`)
-— the add-in-excluding decomposition describes the classes better, so
-**structural is what
-the pipeline ships**. The full vector still exists internally (it picks each
-ingredient's primary part for the density lookup); it never reaches the dataset.
+Describing the classes with each favors the add-in-excluding convention
+(structural separation −0.005 vs −0.018 full at the time of the comparison,
+reproducible via `DECOMPOSITION_MODE`), so **structural is what the pipeline
+ships**. The full vector still exists internally (it picks each ingredient's
+primary part for the density lookup); it never reaches the dataset.
 
-## Reading the results
+## The Aid
 
-**`output/report.html` is the one artifact to open** — a single self-contained
-page (plotly.js inlined, opens offline) with four panels and nothing else: the
-simple-ratio plane (log wetness vs log richness — (liquid+egg):flour vs
-(fat+sugar):flour, trimmed class hulls + centroids), the richness violin per class (fat + sugar share, a hand-picked
-manual axis, sorted by the distribution's mode — where the class bulges), and
-the ternary and tetrahedron simplexes in
-tag-class colors — small, strongly translucent markers so overplotted points
-alpha-blend instead of hiding each other; the tetrahedron is a plain
-wireframe, no cartesian axes. Every geometry panel marks each class centroid
-(closed geometric mean) and the book-archetype stars; hovering the ternary
-shows a recipe's name, class and simple ratios
-(`flour:liquid:egg:fat:sugar` per 100 flour).
+`output/bakers_aid.html` is the project's product: one self-contained page
+(no server, no build step, works offline) that lets you *interrogate* the
+ratio space instead of looking at it.
 
-Remaining outputs, for programmatic use:
+- **One geometry, every partition.** Every recipe is five structural parts;
+  a view is a partition of those parts into groups — two groups a 1D axis,
+  three a triangle (flour at the top), four a tetrahedron. A **divider bar**
+  above the plot shows the partition as `[rest] | flour | wet | rich`: drag a
+  pill to another compartment (or click it, then the compartment), drag it onto
+  the `+` box to give it its own compartment, click a divider `|` to merge two
+  compartments, or a compartment's `+|` to peel one part off. Compartments carry numbered badges matching
+  the plot corners. In 3D, two corners that line up on screen show their badges
+  fused (the 4th vertex hidden behind its parent) and clicking that fused pair
+  merges them. A split (2D→3D) turns the *regular* tetrahedron rigidly about the
+  edge joining the two untouched corners: those two stay exactly on the 2D
+  triangle, the split corner swings out, and the new apex lands on the same pixel
+  as it (hidden) until you orbit to reveal it; 3D→2D reverses that turn back to
+  the equilateral. A part pulled out of the `rest` box has no parent corner, so
+  the view opens face-on instead.
+  Within 3D, editing preserves the angle you orbited to; points tween between
+  views.
+  Book archetypes (★, Ruhlman's *Ratio*) are defined on the same five parts, so
+  they project identically in every partition — reference stars everywhere.
+- **Search drives the geometry.** The search bar takes typed chips:
+  ingredients (resolved to the same USDA heads stage 1 uses, plural-
+  insensitive), classes (in their palette color), name keywords, and ratio
+  ranges (`sugar 40-60%`, or merged targets like `rich`). Matches stay
+  full-color; everything else whispers to 4% opacity — you see *where in the
+  space* your search lives.
+- **Families filter.** The class legend above the plot is a row of family
+  chips (cookie, cake, ...). Click one to isolate it, click several to combine
+  (OR); the selection is ANDed with the search query. The weak-tier
+  `dessert_other` family is not shown at all.
+- **The ratio card.** Click any point: the panel shows what the recipe page
+  does not — the five parts per 100 flour in display order flour : fat :
+  sugar : liquid : egg (`100 : 50 : 50 : 100 : 100`), the composition bar, the
+  nearest book archetype with its Aitchison distance, and where the recipe
+  sits inside its class (per-part percentiles). All of it is computed in the
+  browser from raw shares; Python compiles data, the client owns geometry.
+- **Provenance and science stay honest.** Stage-1 row accounting ships in
+  the data (for a future About view); the separation finding (≈ 0, the
+  continuum) remains the method's result, printed by stage 2 and documented
+  below.
 
-- `compositions.csv` — one row per recipe: the 5-part proportions plus its
-  nearest book archetype and Aitchison distance to it (and the recipe `url`).
-- `class_richness_summary.csv` — per-class mean/std/mode of the richness
-  axis (fat + sugar share); the classes order correctly along it (lean →
-  rich), confirming the ratio *does* encode the right gradient.
-- Internal diagnostics (CSV only, deliberately not in the report):
-  `class_extremes.csv` — per-class far-from-centroid recipes with inspection
-  evidence, the maintainer's loop for finding stage-1 bugs; `outliers.csv` —
-  the robust-Mahalanobis-dropped tail; `data_quality.csv` — mass share per
-  density conversion basis; `unresolved_heads.csv` — the standing curation
-  queue (see `src/analysis/quality.py`).
+Internal diagnostics (CSV only, deliberately not in any user-facing page):
+`class_extremes.csv` — per-class far-from-centroid recipes with inspection
+evidence, the maintainer's loop for finding stage-1 bugs; `outliers.csv` —
+the robust-Mahalanobis-dropped tail; `data_quality.csv` — mass share per
+density conversion basis; `unresolved_heads.csv` — the standing curation
+queue (see `src/method/quality.py`).
 
 ## Tests
 
@@ -187,6 +224,13 @@ nix develop -c python -m pytest -q
 ```
 
 The suite covers the parser (fractions, RecipeNLG's mangled `1/4`→`14` ranges),
-unit conversion, decomposition rules, the tag taxonomy, the compositional
-transforms (closure/CLR/ILR geometry), the ILR isometry (Aitchison distances
-preserved), and outlier-gate determinism.
+unit conversion, decomposition rules, the tag taxonomy, the dataset contract,
+the Aid builder (data compilation + byte-deterministic packing), the
+compositional transforms (closure/CLR/ILR geometry), the ILR isometry
+(Aitchison distances preserved), and outlier-gate determinism. The Aid's
+DOM-free JS (geometry, partitions, search, panel helpers) runs under qjs via
+`tests/test_web.js`; the DOM code is syntax-checked there and exercised in
+the browser.
+
+Two consecutive stage-2 runs produce a byte-identical `bakers_aid.html` —
+the product is as deterministic as the dataset.

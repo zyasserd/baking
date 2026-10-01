@@ -30,6 +30,7 @@ _PREP_PROPS = frozenset({
     "firmly", "lightly", "well", "seeded", "cored", "trimmed", "washed",
     "toasted", "thawed", "cooked", "boneless", "skinless", "lean", "frozen",
     "canned", "fresh", "dried", "extra", "virgin", "room", "temperature", "to",
+    "chilled",
     "taste", "large", "medium", "small", "unseasoned", "seasoned", "prepared",
     "smoked", "unsalted", "salted", "plain", "nonfat", "reduced", "low",
     # Water temperature descriptors ("boiling water") — deliberately NOT "hot"
@@ -69,6 +70,28 @@ _NONBAKED_KINDS = frozenset({
 
 _PAREN_RE = re.compile(r"\(([^)]*)\)")
 _WORD_RE = re.compile(r"[a-z0-9]+")
+
+# Tokens that are measurement artifacts leaked into the name after the amount
+# was stripped ("sugar 100g", "flour 1 1 2 c", "water 110"): a bare number, a
+# number+unit run-together, or a stray unit abbreviation.
+_MEASURE_RE = re.compile(r"^\d+[a-z]{0,3}$")
+_UNIT_ABBR = frozenset({
+    "c", "g", "kg", "mg", "ml", "l", "oz", "lb", "lbs", "tbsp", "tsp",
+    "f", "cm", "mm", "inch", "inches", "degree", "degrees",
+    "cup", "cups", "tablespoon", "tablespoons", "teaspoon", "teaspoons",
+    "ounce", "ounces", "pound", "pounds", "gram", "grams", "liter", "liters",
+    "milliliter", "milliliters",
+})
+
+# Connectors that end the ingredient name — everything after them is a note
+# ("baking soda dissolved in 2 tsp water", "sugar plus 2 tablespoons",
+# "butter at room temperature"). The name is a noun phrase; a verb or
+# preposition starts the preparation note.
+_NOTE_STOP = frozenset({
+    "plus", "about", "approximately", "dissolved", "mixed", "reserving",
+    "stirred", "combined", "and", "in", "with", "into", "for", "then",
+    "until", "as", "at", "or",
+})
 
 _COMPONENT_RE = re.compile(
     r"^(?:for\s+(?:the|a)\s+)?(?:[a-z][a-z' ]{0,30}?\s+)?"
@@ -113,7 +136,23 @@ def _strip_props(name: str) -> tuple[str, list[str]]:
                 props.append(token)
             else:
                 kept.append(token)
-    head = " ".join(kept).strip()
+
+    # Drop measurement artifacts and cut the name at the first note connector,
+    # so "flour 1 1 2 c", "sugar 100g" and "baking soda dissolved in 2 tsp
+    # water" all reduce to their ingredient ("flour", "sugar", "baking soda").
+    # Leading note words ("plus 2 tbsp light brown sugar") are skipped rather
+    # than cut, so the name that follows is kept.
+    cleaned: list[str] = []
+    for token in kept:
+        if _MEASURE_RE.match(token) or token in _UNIT_ABBR:
+            continue
+        if token in _NOTE_STOP:
+            if cleaned:
+                break
+            continue
+        cleaned.append(token)
+    head = " ".join(cleaned).strip() or " ".join(kept).strip()
+
     # Stray connective left when a container word moved to props
     # ("box of X" -> "of X"). Only leading; "cream of tartar" keeps its "of".
     if head.startswith("of "):

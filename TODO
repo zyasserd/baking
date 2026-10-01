@@ -1,0 +1,14 @@
+- 1D
+  - the countors are too big that they intersect each other too much
+- 3D -> 2D
+  - merge handle: when the two circles of the 3D gets close enough act as if they are merging together animation like sth two balls fusing, then allow to be pressed to fuse and convert to 2D
+- remove "where this sits in X" from the ratio card
+- centroid markers on the plot
+- neighbourhoods (local density / similar recipes)
+- decide: remove pie_pastry?
+- search
+    - if you write a family, just highlight it in the bar down then
+
+- simplify
+- about
+    - flow chart

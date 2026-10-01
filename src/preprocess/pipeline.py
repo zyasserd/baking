@@ -30,6 +30,8 @@ Outputs (see config DATA section):
 - ``data/processed/recipes_simplex.csv`` — one row per kept recipe: identity +
   url + tags + structural part grams + simplex proportions (sum to 1) + flags +
   Food.com nutrition.
+- ``data/processed/provenance.json`` — this run's row-accounting statistics
+  (rows in/out and why), the dataset's provenance for the Aid's About view.
 
 The Food.com file must be downloaded manually (Kaggle login; see flake.nix) —
 its sha256 is pinned there and validated by the dev shell on entry.
@@ -39,6 +41,7 @@ from __future__ import annotations
 
 import ast
 import csv
+import json
 import os
 import re
 
@@ -407,5 +410,17 @@ def build(
     full_df = pd.DataFrame(full_rows, columns=["recipe_id"] + _GRAM_COLUMNS)
     os.makedirs(os.path.dirname(full_path) or ".", exist_ok=True)
     full_df.to_csv(full_path, index=False)
+
+    # Row-accounting statistics beside the dataset: the dataset's provenance.
+    provenance = {
+        "stats": dict(sorted(stats.items())),
+        "parts": list(config.ANALYSIS_PARTS),
+        "proportion_columns": _PROPORTION_COLUMNS,
+    }
+    prov_path = config.PROVENANCE_JSON
+    os.makedirs(os.path.dirname(prov_path) or ".", exist_ok=True)
+    with open(prov_path, "w", encoding="utf-8") as fh:
+        json.dump(provenance, fh, indent=2, sort_keys=True)
+        fh.write("\n")
 
     return stats

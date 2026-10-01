@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Baker's Aid</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Baker's Aid</h1>
+  <div id="searchbar">
+    <div id="searchrow">
+      <span id="chips"></span>
+      <input id="search" type="text"
+        placeholder="search: ingredient, class, keyword, ratio …" disabled>
+    </div>
+    <span id="count"></span>
+    <div id="dropdown"></div>
+  </div>
+  <button id="reset" title="reset to flour : wet : rich">reset</button>
+</header>
+<nav id="legend"></nav>
+<nav id="ratio"></nav>
+<main>
+  <section id="plot">
+    <canvas id="canvas"></canvas>
+    <div id="tooltip"></div>
+  </section>
+  <aside id="panel"><p id="status">loading…</p></aside>
+</main>
+<!-- The data script: referenced by relative path for the dev loop (works over
+     file://); the packer replaces this line with the inlined data. -->
+<script src="../output/aid/data.js"></script>
+<script src="app/palette.js"></script>
+<script src="app/state.js"></script>
+<script src="app/geo.js"></script>
+<script src="app/views.js"></script>
+<script src="app/search.js"></script>
+<script src="app/searchbar.js"></script>
+<script src="app/legend.js"></script>
+<script src="app/dividerbar.js"></script>
+<script src="app/plot.js"></script>
+<script src="app/panel.js"></script>
+<script src="app/main.js"></script>
+</body>
+</html>

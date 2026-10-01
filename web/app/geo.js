@@ -1,0 +1,338 @@
+/* Geometry: partitions of the five parts, barycentric coordinates, projections.
+ *
+ * A view is a PARTITION of {flour, liquid, egg, fat, sugar} into k displayed
+ * groups — k=1 an axis, k=2 a triangle, k=3 a tetrahedron. Parts left out of
+ * the groups are a hidden "rest"; displayed coordinates renormalize over the
+ * shown total, so e.g. the hydration triangle (flour:liquid:egg) is a true
+ * subcomposition. The same operator merges recipes and archetypes alike.
+ *
+ * Pure math, no DOM — executed by tests/test_web.js under qjs.
+ */
+(function () {
+  "use strict";
+  const AID = (globalThis.AID = globalThis.AID || {});
+
+  AID.PART_NAMES = ["flour", "liquid", "egg", "fat", "sugar"];
+
+  /* Display order: the parts as shown in the readout, card and legend.
+   * Indices into PART_NAMES / the data columns — flour, fat, sugar, liquid, egg. */
+  AID.DISPLAY_ORDER = [0, 3, 4, 1, 2];
+
+  // Named partitions. groups = part indices displayed, in slot order.
+  // 1D partitions are two-group (the axis group vs its complement), so the
+  // value is the group's share of the WHOLE composition, not a renormalized
+  // subcomposition.
+  AID.PARTITIONS = {
+    rich:       { dim: 1, groups: [[3, 4], [0, 1, 2]] },
+    wet:        { dim: 1, groups: [[1, 2], [0, 3, 4]] },
+    flourAxis:  { dim: 1, groups: [[0], [1, 2, 3, 4]] },
+    canon2:     { dim: 2, groups: [[0], [1, 2], [3, 4]] },   // flour : wet : rich
+    hydration:  { dim: 2, groups: [[0], [1], [2]] },          // rest: fat+sugar
+    shortbread: { dim: 2, groups: [[0], [3], [4]] },          // rest: liquid+egg
+    canon3:     { dim: 3, groups: [[0], [1, 2], [3], [4]] },  // flour : wet : fat : sugar
+    egg3:       { dim: 3, groups: [[0], [1], [2], [3, 4]] },
+  };
+
+  AID.groupLabel = g => g.map(i => AID.PART_NAMES[i]).join("+");
+
+  /* Resolve a partition spec to groups: a preset name or literal groups. */
+  AID.resolveGroups = function (part) {
+    if (typeof part === "string") {
+      const p = AID.PARTITIONS[part];
+      if (!p) throw new Error("unknown partition: " + part);
+      return p.groups;
+    }
+    return part;
+  };
+
+  /* Displayed-group count -> view dimension. One displayed group = the axis
+   * (raw share of the whole); two groups still a 1D axis (group vs its
+   * complement); three a triangle; four a tetrahedron. */
+  AID.dimOf = function (groups) {
+    return groups.length <= 2 ? 1 : groups.length - 1;
+  };
+
+  AID.groupsKey = groups => groups.map(g => g.join("+")).join("|");
+
+  /* Parts not currently shown in any group. */
+  AID.hiddenParts = function (groups) {
+    const shown = new Set(groups.flat());
+    return [0, 1, 2, 3, 4].filter(i => !shown.has(i));
+  };
+
+  /* Grouping edits behind the divider bar — all pure, all return a fresh
+   * groups array. A "group" is one compartment / plot vertex. */
+
+  /* Move `part` into compartment `target` (or, target < 0, to the rest). An
+   * emptied source compartment disappears; at least one compartment remains. */
+  AID.movePart = function (groups, part, target) {
+    let g = groups.map(a => a.slice());
+    const src = g.findIndex(a => a.indexOf(part) >= 0);
+    if (src >= 0) g[src] = g[src].filter(p => p !== part);
+    if (target >= 0 && target < g.length) {
+      g[target] = g[target].concat([part]).sort((a, b) => a - b);
+    }
+    g = g.filter(a => a.length > 0);
+    return g.length ? g : [[part]];
+  };
+
+  /* Merge compartment j into i (default j = i + 1) — one fewer vertex. */
+  AID.mergeGroups = function (groups, i, j) {
+    const g = groups.map(a => a.slice());
+    if (j === undefined) j = i + 1;
+    if (i < 0 || j < 0 || i >= g.length || j >= g.length || i === j) return g;
+    const [a, b] = i < j ? [i, j] : [j, i];
+    g[a] = g[a].concat(g[b]).sort((x, y) => x - y);
+    g.splice(b, 1);
+    return g;
+  };
+
+  /* Split one part off compartment i into a new compartment at the end — the
+   * new geometric vertex (up to four). No-op for a lone part or a full
+   * simplex. Appending keeps the new corner the "extra" vertex, so its birth
+   * animation can start it on the compartment it was split from. */
+  AID.splitGroup = function (groups, i) {
+    const g = groups.map(a => a.slice());
+    if (i < 0 || i >= g.length || g[i].length < 2 || g.length >= 4) return g;
+    const part = g[i].pop();
+    g.push([part]);
+    return g;
+  };
+
+  /* Pull `part` (from any compartment, or from the rest) into its own brand
+   * new compartment at the end — the drag target for "add a divider". */
+  AID.pullOut = function (groups, part) {
+    const g = groups.map(a => a.slice());
+    if (g.length >= 4) return g;
+    const src = g.findIndex(a => a.indexOf(part) >= 0);
+    if (src < 0) return g.concat([[part]]); // was hidden
+    g[src] = g[src].filter(p => p !== part);
+    const out = g.filter(a => a.length > 0);
+    out.push([part]);
+    return out;
+  };
+
+  /* Per-recipe barycentric coordinates: Float32Array(n*k), group sums
+   * renormalized over the displayed parts (k=1: the raw share of the whole).
+   * P is an array of 5-share rows; spec is a preset name or groups array. */
+  AID.bary = function (P, spec) {
+    const groups = AID.resolveGroups(spec);
+    const k = groups.length, n = P.length;
+    const out = new Float32Array(n * k);
+    for (let r = 0; r < n; r++) {
+      const row = P[r];
+      let tot = 0;
+      for (let g = 0; g < k; g++) {
+        let s = 0;
+        const idx = groups[g];
+        for (let j = 0; j < idx.length; j++) s += row[idx[j]];
+        out[r * k + g] = s;
+        tot += s;
+      }
+      const inv = tot > 0 ? 1 / tot : 0;
+      for (let g = 0; g < k; g++) out[r * k + g] *= k === 1 ? 1 : inv;
+    }
+    return out;
+  };
+
+  /* 2D frame space: equilateral triangle, y up, flour at the top.
+   * Vertex slots match group slots; slot 0 (flour) is the apex. */
+  AID.TRI2 = [[0.5, 0.8660254], [0, 0], [1, 0]];
+
+  AID.project2 = function (b, out) {
+    // b: 3 barycentric coords -> [x, y]
+    const x = b[0] * AID.TRI2[0][0] + b[1] * AID.TRI2[1][0] + b[2] * AID.TRI2[2][0];
+    const y = b[0] * AID.TRI2[0][1] + b[1] * AID.TRI2[1][1] + b[2] * AID.TRI2[2][1];
+    out[0] = x; out[1] = y;
+  };
+
+  /* 3D frame space: regular tetrahedron. The base face of slots 0,1,2 is
+   * exactly TRI2 (same orientation, flour at the top), and slot 3 is the apex
+   * above its centroid — so the 2D triangle is a face of the 3D tetrahedron and
+   * the two views share an orientation. */
+  AID.TET3 = [
+    [0.5, 0.8660254, 0],             // slot 0: top of the base face
+    [0, 0, 0],                       // slot 1: bottom-left
+    [1, 0, 0],                       // slot 2: bottom-right
+    [0.5, 0.2886751, 0.8164966],     // slot 3: apex over the centroid
+  ];
+
+  /* The untouched regular orientation. Every birth/merge is a rigid rotation of
+   * THIS, so the tetrahedron is never deformed — only turned. */
+  AID.TET3_REGULAR = AID.TET3.map(v => v.slice());
+
+  /* Birth phase 0..1 while a 2D↔3D split animates: the apex (and its edges) is
+   * faded by this so the flat 2D view carries over without a pop. */
+  AID.birthE = 1;
+
+  /* True centroid of the tetrahedron — the orbit pivot. Rotating about it
+   * keeps the shape centred instead of drifting as yaw/pitch change. */
+  const TET_CENTROID = AID.TET3.reduce(
+    (a, v) => [a[0] + v[0] / 4, a[1] + v[1] / 4, a[2] + v[2] / 4], [0, 0, 0]);
+  AID.TET_CENTROID = TET_CENTROID;
+
+  /* Rotation-independent bounding-sphere radius: the frame is fitted once to
+   * this, so the scene never pulses as the bounding box changes with yaw. */
+  AID.TET_RADIUS = Math.max(...AID.TET3.map(v => Math.hypot(
+    v[0] - TET_CENTROID[0], v[1] - TET_CENTROID[1], v[2] - TET_CENTROID[2])));
+
+  /* Orthographic 3D projection with yaw (around the vertical axis) and pitch.
+   * Returns [x, y] in frame space; out[2] (if present) receives the rotated
+   * depth for painter's-order drawing. */
+  AID.project3 = function (b, yaw, pitch, out) {
+    let x = 0, y = 0, depth = 0;
+    const cy = Math.cos(yaw), sy = Math.sin(yaw);
+    const cp = Math.cos(pitch), sp = Math.sin(pitch);
+    for (let i = 0; i < 4; i++) {
+      const v = AID.TET3[i], w = b[i];
+      // translate to centroid, yaw around the vertical axis, then pitch.
+      const vx = v[0] - TET_CENTROID[0];
+      const vy = v[1] - TET_CENTROID[1];
+      const vz = v[2] - TET_CENTROID[2];
+      const x1 = vx * cy + vz * sy;
+      const z1 = -vx * sy + vz * cy;
+      const y1 = vy * cp - z1 * sp;
+      x += w * (x1 + TET_CENTROID[0]);
+      y += w * (y1 + TET_CENTROID[1]);
+      depth += w * z1;
+    }
+    out[0] = x; out[1] = y;
+    if (out.length > 2) out[2] = depth;
+  };
+
+  /* ── "Birth": turn the tetrahedron so the 4th vertex hides behind the corner
+   * it was split from, keeping the other two base corners pinned ──
+   *
+   * A split takes a part out of corner X; the other two base corners Y,Z are
+   * untouched. Rotating rigidly about the edge Y–Z leaves Y,Z exactly where they
+   * are on screen, swings X out, and carries the apex around the (opposite) edge
+   * X–apex until that edge points at the viewer — so the apex lands on the same
+   * pixel as X, hidden behind it. `e` is the animation phase (0 = the plain
+   * regular face-on tetra, 1 = fully born); other splits/merges reverse it.
+   * A part pulled out of the `rest` box has no parent, so nothing rotates. */
+
+  const _sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+  const _dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const _cross = (a, b) => [
+    a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const _unit = a => {
+    const l = Math.hypot(a[0], a[1], a[2]) || 1;
+    return [a[0] / l, a[1] / l, a[2] / l];
+  };
+  /* Rodrigues: rotate point p about the axis (through q, direction a) by th. */
+  function _rot(p, q, a, th) {
+    const x = p[0] - q[0], y = p[1] - q[1], z = p[2] - q[2];
+    const c = Math.cos(th), s = Math.sin(th), d = _dot(a, [x, y, z]);
+    const cr = _cross(a, [x, y, z]);
+    return [
+      q[0] + x * c + cr[0] * s + a[0] * d * (1 - c),
+      q[1] + y * c + cr[1] * s + a[1] * d * (1 - c),
+      q[2] + z * c + cr[2] * s + a[2] * d * (1 - c),
+    ];
+  }
+
+  AID.setBirthAt = function (slot, e) {
+    const reg = AID.TET3_REGULAR;
+    for (let i = 0; i < 4; i++) AID.TET3[i] = reg[i].slice();
+    if (slot == null || !e) return;
+    const y = (slot + 1) % 3, z = (slot + 2) % 3;
+    const axis = _unit(_sub(AID.TET3[z], AID.TET3[y]));
+    const w = _sub(AID.TET3[3], AID.TET3[slot]);       // the opposite edge X–apex
+    const up = [0, 0, 1];
+    const th = Math.atan2(_dot(_cross(w, up), axis), _dot(w, up)) * e;
+    const q = AID.TET3[y];
+    for (let i = 0; i < 4; i++) AID.TET3[i] = _rot(AID.TET3[i], q, axis, th);
+  };
+
+  /* The corner a 2D→3D split's new vertex was born on: old groups (3) lost a
+   * part into the appended compartment (groups[3]); the parent is the
+   * compartment that part came from, null if it was a hidden "rest" part. */
+  AID.birthParent = function (oldGroups, groups) {
+    if (!oldGroups || oldGroups.length !== 3 || groups.length !== 4) return null;
+    const baby = groups[groups.length - 1];
+    if (!baby || baby.length !== 1) return null;
+    const oi = oldGroups.findIndex(g => g.indexOf(baby[0]) >= 0);
+    return oi >= 0 ? oi : null;
+  };
+
+  /* Simple-ratio readout: parts per 100 flour, "100 : 50 : 50 : 100 : 100"
+   * in display order (flour : fat : sugar : liquid : egg). */
+  AID.readout = function (row) {
+    const f = row[0] > 0 ? row[0] : 1;
+    const s = AID.DISPLAY_ORDER.map(i => Math.round((row[i] / f) * 100));
+    return s.join(" : ");
+  };
+
+  /* ── Aitchison geometry: ILR (pivot balances) and nearest archetype ──
+   *
+   * Mirrors src/method/coda.py so distances agree with the method's numbers.
+   * Zero replacement follows config.ZERO_REPLACEMENT_DELTA (delta = factor *
+   * min positive share in the row). */
+
+  AID.ZERO_REPLACEMENT_DELTA = 0.5;
+
+  function pivotPsi(D) {
+    const psi = [];
+    for (let k = 0; k < D - 1; k++) {
+      const coef = Math.sqrt((D - k - 1) / (D - k));
+      const row = new Array(D).fill(0);
+      row[k] = coef;
+      for (let j = k + 1; j < D; j++) row[j] = -coef / (D - k - 1);
+      psi.push(row);
+    }
+    return psi;
+  }
+  const PSI5 = pivotPsi(5);
+
+  function ilrRow(P, psi) {
+    const z = [];
+    for (const row of psi) {
+      const pos = [], neg = [];
+      for (let j = 0; j < P.length; j++) (row[j] > 0 ? pos : neg).push(Math.log(P[j]));
+      const mean = a => a.reduce((s, v) => s + v, 0) / a.length;
+      const r = pos.length, sN = neg.length;
+      z.push(Math.sqrt(r * sN / (r + sN)) * (mean(pos) - mean(neg)));
+    }
+    return z;
+  }
+
+  function replaceZeros(row) {
+    const minPos = Math.min(...row.filter(v => v > 0));
+    const delta = AID.ZERO_REPLACEMENT_DELTA * minPos;
+    const out = row.map(v => (v > 0 ? v : delta));
+    const tot = out.reduce((s, v) => s + v, 0);
+    return out.map(v => v / tot);
+  }
+
+  /* Nearest archetype by Aitchison distance (Euclidean in ILR). */
+  AID.aitchisonNearest = function (Prow, archs) {
+    const P = replaceZeros(Prow);
+    const z = ilrRow(P, PSI5);
+    let best = null, bd = Infinity;
+    for (const a of archs) {
+      const za = ilrRow(replaceZeros(a.P), PSI5);
+      let d = 0;
+      for (let i = 0; i < z.length; i++) { const e = z[i] - za[i]; d += e * e; }
+      d = Math.sqrt(d);
+      if (d < bd) { bd = d; best = a; }
+    }
+    return { name: best.name, d: bd };
+  };
+
+  /* Percentile of v within a class distribution given [p05,p25,p50,p75,p95],
+   * piecewise-linear in between (below p05 -> 0-5, above p95 -> 95-100). */
+  AID.percentileOf = function (v, qs) {
+    const cuts = [0, 5, 25, 50, 75, 95, 100];
+    const edges = [-Infinity].concat(qs, [Infinity]);
+    for (let i = 0; i < 5; i++) {
+      if (v >= edges[i] && v <= edges[i + 1]) {
+        const lo = edges[i], hi = edges[i + 1];
+        if (hi === lo) return (cuts[i] + cuts[i + 1]) / 2;
+        const t = (v - lo) / (hi - lo);
+        return cuts[i] + t * (cuts[i + 1] - cuts[i]);
+      }
+    }
+    return 50;
+  };
+
+})();

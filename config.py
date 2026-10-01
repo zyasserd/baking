@@ -5,8 +5,9 @@ The pipeline has two stages (see README):
 1. **preprocess** (`scripts/preprocess.py`): raw corpora -> a per-recipe
    dataset of structural part grams + simplex proportions (summing to 1) and
    independent Food.com tag labels.
-2. **analysis** (`scripts/analyze.py`): that dataset -> PCA, clustering,
-   figures, results.
+2. **analyze** (`scripts/analyze.py`): that dataset -> the Aid, a
+   self-contained interactive page describing the tag classes in ratio space
+   (``src.method`` holds the science, ``src.aid`` builds the product).
 
 Every tunable *decision* lives here: the taxonomy, the decomposition rules,
 densities, thresholds, folds, seeds. Implementation *facts* (unit conversions,
@@ -15,7 +16,7 @@ with the code that implements them, in ``src/preprocess/``.
 
 Every section below is marked with the stage that consumes it:
 
-  [STAGE 1]  preprocess-only      [STAGE 2]  analysis-only
+  [STAGE 1]  preprocess-only      [STAGE 2]  method + aid
   [SHARED]   used by both         [DATA]     raw-data locations / provenance
 """
 
@@ -58,6 +59,10 @@ FDC_REFERENCE_CSV = "data/interim/fdc_srlegacy.csv"
 # Stage-1 outputs.
 INTERIM_INGREDIENTS_CSV = "data/interim/ingredients.csv"
 PROCESSED_RECIPES_CSV = "data/processed/recipes_simplex.csv"
+
+# Stage-1 run statistics beside the dataset (rows in/out and why): provenance
+# for the Aid's About view, written on every stage-1 run.
+PROVENANCE_JSON = "data/processed/provenance.json"
 
 # Sidecar for the "full" decomposition comparison (add-ins pooled in); written
 # by stage 1, read by stage 2 only when DECOMPOSITION_MODE == "full".
@@ -642,11 +647,11 @@ ARCHETYPES: dict[str, list[float]] = {
 
 # The 4-part sub-composition used to draw the 4-D simplex in 3-D. Egg folds
 # into liquid ("wet": an egg is ~75% water and behaves as a hydrated structure-
-# builder). This merge is chosen empirically, not by taste: clustering the tag
-# classes in each candidate 4-part sub-composition (all 10 single-pair merges)
-# gives ARI 0.21 for liquid+egg vs ~0.17 for every alternative (including the
-# fat+sugar "richness" fold), and it also keeps the book archetypes most
-# distinct (min pairwise Aitchison distance 0.57 vs 0.44 for fat+sugar).
+# builder). This merge was chosen empirically when the project still scored
+# partitions: the tag classes separated best (ARI 0.21) for liquid+egg vs ~0.17
+# for every alternative (including the fat+sugar "richness" fold), and it keeps
+# the book archetypes most distinct (min pairwise Aitchison distance 0.57 vs
+# 0.44 for fat+sugar). Kept as the documented decision record.
 TETRAHEDRON_PARTS = ["flour", "liquid+egg", "fat", "sugar"]
 
 TETRAHEDRON_SOURCES: list[list[str]] = [
@@ -657,7 +662,7 @@ TETRAHEDRON_SOURCES: list[list[str]] = [
 ]
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ANALYSIS — outliers, clustering, subsampling.  [STAGE 2]
+# ANALYSIS — outlier gate, class separation, subsampling.  [STAGE 2]
 # ══════════════════════════════════════════════════════════════════════════════
 
 # Multiplicative zero-replacement: delta = ZERO_REPLACEMENT_FACTOR * min(positive).
@@ -667,9 +672,7 @@ ZERO_REPLACEMENT_DELTA = 0.5
 OUTLIER_CONTAMINATION = 0.01
 
 
-# Subsample cap for figures/clustering, and the separation-silhouette sample
-# cap (both for speed; results are stable past a few thousand recipes).
-VIZ_SAMPLE_MAX = 20000
+# Separation-silhouette sample cap (for speed; stable past a few thousand).
 SILHOUETTE_SAMPLE_MAX = 20000
 
 # Which decomposition feeds stage 2: "structural" (the shipped simplex) or
@@ -689,7 +692,7 @@ MIN_TAG_CONFIDENCE: str | None = None
 
 # Per-class extreme-recipe diagnostics: for each tag class, flag this many
 # recipes farthest from the class centroid (Aitchison distance) — usually
-# processing errors worth inspecting (see src/analysis/validate.py). The
+# processing errors worth inspecting (see src/method/validate.py). The
 # pseudocount keeps |log-ratio| deviations finite at structural zeros.
 EXTREMES_PER_CLASS = 10
 EXTREMES_LOG_EPS = 0.005

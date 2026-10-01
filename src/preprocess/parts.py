@@ -9,7 +9,7 @@ section of ``config``.
 
 This is a stage-1 concern: the proportions are written into the preprocessed
 dataset (``*_p`` columns summing to 1) so stage 2 consumes them directly.
-Log-ratio transforms (CLR/ILR) live in stage 2 (``src.analysis.coda``).
+Log-ratio transforms (CLR/ILR) live in stage 2 (``src.method.coda``).
 """
 
 from __future__ import annotations

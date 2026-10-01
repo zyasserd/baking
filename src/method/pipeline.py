@@ -8,12 +8,12 @@ reference archetypes, never as labels.
 
 The tag classes are DESCRIBED in ratio space, not predicted: recipes are
 placed as balances of the simplex (flour/liquid/egg/fat/sugar — ILR, see
-``src.analysis.coda``), far-out parse errors are gated out, and the classes
-are summarized by a hand-picked manual axis (richness = fat + sugar share,
-sorted by distribution mode), per-class centroids in the simplexes, and their
-separation (mean silhouette of the tag labels; ~0 = the continuum finding).
-No clustering, no statistical components. Suspect-recipe diagnostics
-(``validate.py``) are internal CSVs, not report content. Every parameter
+``src.method.coda``), far-out parse errors are gated out, and the classes are
+summarized by their separation (mean silhouette of the tag labels; ~0 = the
+continuum finding) and the richness ordering by distribution mode. No
+clustering, no statistical components. Suspect-recipe diagnostics
+(``validate.py``, ``quality.py``) are internal CSVs for the maintainer; the
+Aid builder (``src.aid``) recomputes all geometry client-side. Every parameter
 lives in ``config`` (ANALYSIS section); the entry point takes no tuning flags.
 """
 
@@ -23,13 +23,16 @@ import os
 
 import numpy as np
 import pandas as pd
+from scipy.stats import gaussian_kde
 from sklearn.metrics import silhouette_score
 
 import config
 
+from .. import dataset
+from ..aid import pack as aid_pack
+from ..aid import web as aid_web
 from ..preprocess import parts
-from . import coda, folds, outliers, quality, validate
-from . import report as html_report
+from . import coda, outliers, quality, validate
 
 
 def _apply_full_mode(df: pd.DataFrame) -> pd.DataFrame:
@@ -55,102 +58,83 @@ def _apply_full_mode(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def analyze(df: pd.DataFrame, outdir: str) -> dict:
+def mode_estimate(values: np.ndarray) -> float:
+    """The peak of the distribution's KDE — where the class bulges the most.
+
+    The richness distributions are skewed, so their mean sits in the tail; the
+    KDE mode is the honest "typical value" for ordering the classes.
+    """
+    values = np.asarray(values, dtype=float)
+    values = values[np.isfinite(values)]
+    if len(values) < 10:
+        return float("nan")
+    if len(np.unique(values)) < 2:
+        return float(values[0])
+    grid = np.linspace(values.min(), values.max(), 512)
+    return float(grid[np.argmax(gaussian_kde(values)(grid))])
+
+
+def describe(df: pd.DataFrame, outdir: str) -> dict:
+    """Gate outliers, write diagnostics, and describe the tag classes."""
     # Recipes -> simplex proportions (already closed by stage 1) -> balances.
     P = df[parts.proportion_columns()].to_numpy(dtype=float)
     P = coda.multiplicative_replacement(coda.closure(P))
     ilr = coda.ilr(P)
-    comp = df.copy()
 
     inliers = outliers.detect_outliers(ilr)
     validate.write_envelope_outliers(df, ilr, inliers, outdir)
     df = df[inliers].reset_index(drop=True)
     ilr = ilr[inliers]
-    comp = comp[inliers].reset_index(drop=True)
 
     # Internal diagnostics (CSV only): per class, the recipes farthest from
     # the class centroid — the maintainer's loop for finding stage-1 bugs.
     validate.write_extremes(df, ilr, outdir)
 
-    arch_names, arch_ilr = folds.archetype_ilr()
-    nearest, distance = folds.nearest_archetype(ilr, arch_names, arch_ilr)
-    # df feeds the HTML hover (via the viz subset); comp is the CSV export.
-    df["nearest_archetype"] = nearest
-    df["aitchison_distance"] = distance
-    comp["nearest_archetype"] = nearest
-    comp["aitchison_distance"] = distance
-    comp.to_csv(os.path.join(outdir, "compositions.csv"), index=False)
-
     # Manual axis (no statistical component): richness = fat + sugar share, in
-    # percent of the composition. The violin and the ordering sort by the
-    # distribution MODE (where the class bulges) — the mean sits in the skew tail.
-    rich = pd.DataFrame({
-        "tag_coarse": df["tag_coarse"],
-        "richness": (df["fat_p"] + df["sugar_p"]) * 100.0,
-    })
-    rich_summary = rich.groupby("tag_coarse")["richness"].agg(
-        mean="mean", std="std", count="size")
-    rich_summary["mode"] = [html_report.mode_estimate(rich.loc[rich["tag_coarse"] == cls, "richness"])
-                            for cls in rich_summary.index]
-    rich_summary.sort_values("mode").to_csv(
-        os.path.join(outdir, "class_richness_summary.csv"))
-    richness_order = tuple(rich_summary.sort_values("mode").index)
-
-    n = len(df)
-    if config.VIZ_SAMPLE_MAX > 0 and config.VIZ_SAMPLE_MAX < n:
-        rng = np.random.default_rng(config.RANDOM_SEED)
-        idx = np.sort(rng.choice(n, size=config.VIZ_SAMPLE_MAX, replace=False))
-        viz_df = df.iloc[idx].reset_index(drop=True)
-        viz_ilr = ilr[idx]
-    else:
-        viz_df = df
-        viz_ilr = ilr
-
-    tetra = folds.tetrahedron_matrix(viz_df)
-    tetra_coords = folds.barycentric_3d(tetra)
-    arch_tetra = folds.barycentric_3d(folds.tetrahedron_archetypes())
+    # percent of the composition. The ordering uses the distribution MODE
+    # (where the class bulges) — the mean sits in the skew tail.
+    richness = (df["fat_p"] + df["sugar_p"]) * 100.0
+    richness_order = tuple(
+        df.assign(richness=richness).groupby("tag_coarse")["richness"]
+        .apply(lambda v: mode_estimate(v.to_numpy()))
+        .sort_values().index)
 
     # Tag-class separation in ratio space: mean silhouette of the tag labels
     # over all recipes (no clustering involved; ~0 = the continuum finding).
-    true = viz_df["tag_coarse"].to_numpy()
     separation = silhouette_score(
-        viz_ilr, true, sample_size=min(len(viz_ilr), config.SILHOUETTE_SAMPLE_MAX)
-    )
+        ilr, df["tag_coarse"].to_numpy(),
+        sample_size=min(len(ilr), config.SILHOUETTE_SAMPLE_MAX),
+        random_state=config.RANDOM_SEED)
 
-    metrics: dict = {"n": int(len(df)), "richness_order": richness_order,
-                     "separation": separation}
-
-    # One self-contained HTML page replaces every standalone figure.
-    html_report.write_html(
-        outdir, viz_df, viz_ilr, arch_names, arch_tetra, tetra_coords, metrics,
-    )
-    return metrics
-
-
-def report(df: pd.DataFrame, outdir: str) -> dict:
     print(f"\n===== structural simplex ({len(df)} recipes) =====")
     print("Class distribution:")
     for name, count in df["tag_coarse"].value_counts().items():
         print(f"  {name:<12} {count}")
-
-    metrics = analyze(df, outdir)
     print("\nClass ordering by richness (fat + sugar share), lean -> rich:")
-    for name in metrics["richness_order"]:
+    for name in richness_order:
         print(f"  {name}")
-    print(f"\nTag-class separation (mean silhouette): {metrics['separation']:.3f}")
-    return metrics
+    print(f"\nTag-class separation (mean silhouette): {separation:.3f}")
+    return {"n": int(len(df)), "richness_order": richness_order,
+            "separation": float(separation)}
 
 
 def run(input_csv: str, outdir: str) -> dict:
     os.makedirs(outdir, exist_ok=True)
 
-    df, excluded = coda.load_recipes(input_csv)
+    df_all, excluded = dataset.load_recipes(input_csv)
     excluded.to_csv(os.path.join(outdir, "excluded_flourless.csv"), index=False)
-    print(f"Loaded {len(df)} recipes ({len(excluded)} flourless rows excluded).")
+    print(f"Loaded {len(df_all)} recipes ({len(excluded)} flourless rows excluded).")
 
     # Standing data-quality report (unresolved-heads queue + basis shares).
     quality.write_reports(outdir)
 
+    # The Aid is a browser, not an analysis: it gets the FULL loaded dataset
+    # minus the weak-tier dessert_other family, which is not user-facing. The
+    # method's gates (decomposition mode, weak tier, confidence) apply to the
+    # description below only; the two never share a filtered frame.
+    aid_df = df_all[df_all["tag_coarse"] != "dessert_other"].reset_index(drop=True)
+    print(f"Aid: {len(aid_df)} recipes ({len(df_all) - len(aid_df)} dessert_other hidden).")
+    df = df_all
     if config.DECOMPOSITION_MODE == "full":
         df = _apply_full_mode(df)
         print("Decomposition: FULL (add-ins pooled in)")
@@ -166,6 +150,11 @@ def run(input_csv: str, outdir: str) -> dict:
         print(f"Dropped {int((~keep).sum())} recipes below confidence {config.MIN_TAG_CONFIDENCE}.")
         df = df[keep].reset_index(drop=True)
 
-    metrics = report(df, outdir)
-    print(f"\nOutputs written under {outdir}/")
+    metrics = describe(df, outdir)
+
+    # Product: compile the data, then pack web/ + data into the single HTML.
+    data_js = aid_web.build_data(aid_df, outdir)
+    html_path = aid_pack.pack(outdir)
+    print(f"\nWrote {data_js} ({os.path.getsize(data_js) / 1e6:.1f} MB)")
+    print(f"Wrote {html_path} ({os.path.getsize(html_path) / 1e6:.1f} MB) — the Aid")
     return metrics

@@ -1,9 +1,9 @@
 """STAGE 2 entry point — the preprocessed dataset -> results.
 
-The pipeline itself lives in ``src.analysis.pipeline``; this script only
+The pipeline itself lives in ``src.method.pipeline``; this script only
 parses flags. It reads only the preprocessed dataset (``--input``, default
-``data/processed/recipes_simplex.csv``) plus ``config``, and writes all
-results — analysis outputs and validation diagnostics — under ``--outdir``.
+``data/processed/recipes_simplex.csv``) plus ``config``, and writes the
+results — the Aid, plus maintainer diagnostics — under ``--outdir``.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import config
-from src.analysis import pipeline
+from src.method import pipeline
 
 
 def main() -> None:

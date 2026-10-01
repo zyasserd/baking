@@ -1,14 +1,15 @@
 """Tests for the ILR coordinate system the analysis runs in.
 
-There is no PCA anywhere: recipes are clustered as ILR balances of the
-simplex. These tests pin the properties that make that sound — the ILR is an
-isometry of the Aitchison geometry, so Euclidean distances in ILR equal the
-Aitchison distances of the compositions.
+There is no PCA anywhere: recipes are placed as ILR balances of the simplex
+and the tag classes are described in that space. These tests pin the
+properties that make that sound — the ILR is an isometry of the Aitchison
+geometry, so Euclidean distances in ILR equal the Aitchison distances of the
+compositions.
 """
 
 import numpy as np
 
-from src.analysis.coda import closure, clr, ilr, ilr_inverse, multiplicative_replacement
+from src.method.coda import closure, clr, ilr, ilr_inverse, multiplicative_replacement
 
 
 def _P(n: int = 300) -> np.ndarray:

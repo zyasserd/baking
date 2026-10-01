@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 import config
-from src.analysis import coda, folds
+from src.method import coda, folds
 from src.preprocess import parts
 
 
