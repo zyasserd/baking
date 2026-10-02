@@ -65,6 +65,9 @@ body {
 
 .navlinks a:hover { color: var(--fg); background: #f0f0ea; }
 
+.navicon { display: inline-flex; align-items: center; padding: 5px 7px; }
+.navicon svg { width: 16px; height: 16px; display: block; }
+
 /* ── stacked full-screen view layers ─────────────────────────────────── */
 .view {
   position: fixed;

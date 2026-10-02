@@ -1,21 +1,23 @@
-# Baking ratios — do the ratios predict the baked good?
+# Baker's Aid — do the ratios predict the baked good?
 
 Do the base ingredient ratios (flour, liquid, egg, fat, sugar) determine what
-kind of baked good a recipe is, as Michael Ruhlman's *Ratio* claims? We test it
-at scale: ~2.3 M recipes are turned into **compositional data** (each recipe a
-point on the ingredient simplex) and their ratios are scored against the
-**independent class labels** that Food.com attached to them.
+kind of baked good a recipe is, as Michael Ruhlman's *Ratio* claims? This
+project tests it at scale: ~2.3 M recipes are turned into **compositional data**
+(each recipe a point on the ingredient simplex) and their ratios are scored
+against the **independent class labels** that Food.com attached to them. The
+ratios are the features, the tags are the labels, and the two are never allowed
+to peek at each other.
 
-- The *features* are the ratios (from USDA FoodData Central decomposition).
-- The *labels* are Food.com tags (bread, cookie, cake, ...) — never the ratios.
-- The book's ratios are used only as reference archetypes, never as labels.
+**Result: partially.** The tag classes are *described* in ratio space, not
+predicted from it: their centroids sit in the right places (the classes order
+correctly along a hand-picked richness axis, fat + sugar share), but their
+separation is ≈ 0 (mean silhouette). Baking looks like a **continuum**, and the
+Food.com tags are fuzzy labels painted on it. Nothing is clustered or
+compressed — the geometry shown is the geometry that was computed.
 
-**Result: yes, partially.** The tag classes are *described* in ratio space,
-not predicted from it: their centroids sit in the right places (the classes
-order correctly along the hand-picked richness axis, fat + sugar share), but
-their class separation is ≈ 0 (mean silhouette): baking is a continuum, and
-the Food.com tags are fuzzy labels on it. No clustering, no statistical
-components — the geometry shown is the geometry used.
+The app's **About** page carries the method write-up (pipeline, data
+provenance, the full-vs-structural decision, and the science). This README
+covers the repository.
 
 ## Layout
 
@@ -129,109 +131,6 @@ sandbox — no raw corpora, no network. The output is byte-identical to the
 local `scripts/analyze.py` run above. CI publishes it to GitHub Pages
 (`.github/workflows/pages.yml`).
 
-## What the pipeline computes
-
-1. **Join**: RecipeNLG (text) is joined to Food.com (labels) on the numeric
-   Food.com id at the end of the `link`. The two corpora are independent
-   datasets; the join is the only point of contact.
-2. **Labels**: Food.com tags resolve to a baked-good class (see `config.py`,
-   TAG TAXONOMY). Title rescues exist for the under-tagged pastry and brownies
-   classes; a `dessert_other` weak tier is kept but excluded from scoring.
-3. **Exclusion**: recipes that are not from-scratch baked goods are dropped —
-   mixes, prepared dough, purchased bread/crumbs, finished cookies/cakes used as
-   ingredients, no-bake and topping-only titles (tables in `config.py`).
-4. **Parsing**: each ingredient line becomes quantity + unit + head; quantities
-   are converted to grams with name-aware densities (USDA container weights for
-   cans/jars/packages; one large egg = 50 g; ...).
-5. **Decomposition**: each ingredient head is mapped to a USDA SR Legacy food
-   (curated table + fuzzy matcher) and its per-100 g proximates become part
-   weights: water→water, lipid→fat, sugars→sugar, starch→flour (starchy
-   categories only), sodium→salt. Pure parts are pinned to themselves (butter
-   *is* fat, per the book). The per-ingredient database is written to
-   `data/interim/ingredients.csv` — proportions sum to 1 per ingredient.
-6. **Fold**: per recipe, the structural grams fold into five parts
-   (flour / liquid / egg / fat / sugar; liquid = water + milk) and are closed
-   to simplex coordinates that sum to 1. Non-baked sections (frosting, glaze,
-   icing, ganache, coating) never pool into the ratio.
-
-### Full vs structural
-
-Two decomposition conventions were tested, and the choice is documented here
-because it is the project's main methodological decision:
-
-- **Full** — every ingredient's USDA composition is pooled into the parts,
-  including add-ins (chocolate, nuts, fruit, cheese, ...). A chocolate-chip
-  cookie's chocolate enters as sugar/fat.
-- **Structural** — add-ins are *zeroed*: only structure-forming ingredients
-  count (flours, sugars, fats, eggs, dairy, water, leaveners, salt, yeast),
-  reproducing Ruhlman's clean ratio; the chocolate is flavor, not structure.
-  One documented exception: water-dominant add-ins (moist produce —
-  applesauce, pumpkin, banana, zucchini, berries — acting as the recipe's
-  hydration) contribute their USDA water fraction to the liquid part; their
-  remaining parts stay zeroed.
-
-Describing the classes with each favors the add-in-excluding convention
-(structural separation −0.005 vs −0.018 full at the time of the comparison,
-reproducible via `DECOMPOSITION_MODE`), so **structural is what the pipeline
-ships**. The full vector still exists internally (it picks each ingredient's
-primary part for the density lookup); it never reaches the dataset.
-
-## The Aid
-
-`output/bakers_aid.html` is the project's product: one self-contained page
-(no server, no build step, works offline) that lets you *interrogate* the
-ratio space instead of looking at it.
-
-- **One geometry, every partition.** Every recipe is five structural parts;
-  a view is a partition of those parts into groups — two groups a 1D axis,
-  three a triangle (flour at the top), four a tetrahedron. A **divider bar**
-  above the plot shows the partition as `[rest] | flour | wet | rich`: drag a
-  pill to another compartment (or click it, then the compartment), drag it onto
-  the `+` box to give it its own compartment, click a divider `|` to merge two
-  compartments, or a compartment's `+|` to peel one part off. Compartments carry lettered badges (A, B, C, D) matching
-  the plot corners, and those letters can be referenced in the search bar's
-  ratios. In 3D, two corners that line up on screen show their badges
-  fused (the 4th vertex hidden behind its parent) and clicking that fused pair
-  merges them. A split (2D→3D) turns the *regular* tetrahedron rigidly about the
-  edge joining the two untouched corners: those two stay exactly on the 2D
-  triangle, the split corner swings out, and the new apex lands on the same pixel
-  as it (hidden) until you orbit to reveal it; 3D→2D reverses that turn back to
-  the equilateral. A part pulled out of the `rest` box has no parent corner, so
-  the view opens face-on instead.
-  Within 3D, editing preserves the angle you orbited to; points tween between
-  views.
-  Book archetypes (★, Ruhlman's *Ratio*) are defined on the same five parts, so
-  they project identically in every partition — reference stars everywhere.
-- **Search drives the geometry.** The search bar takes typed chips:
-  ingredients (resolved by stage-1's parser, plural-insensitive), classes (in
-  their palette color), name keywords, and ratio
-  ranges (`sugar 40-60%`, merged targets like `rich`, `+` combinations like
-  `fat+sugar`, or a vertex letter `A`–`D`). Type a full equation
-  (`flour : fat = 2 : 1`, `fat+sugar : flour = 2 : 1`, `A : B = 2 : 1`) to
-  overlay it as a locus. Matches stay full-color; everything else whispers to
-  4% opacity — you see *where in the space* your search lives.
-- **Families filter.** The class legend above the plot is a row of family
-  chips (cookie, cake, ...). Click one to isolate it, click several to combine
-  (OR); the selection is ANDed with the search query. The weak-tier
-  `dessert_other` family is not shown at all.
-- **The ratio card.** Click any point: the panel shows what the recipe page
-  does not — the five parts per 100 flour in display order flour : fat :
-  sugar : liquid : egg (`100 : 50 : 50 : 100 : 100`), the composition bar, the
-  nearest book archetype with its Aitchison distance, and where the recipe
-  sits inside its class (per-part percentiles). All of it is computed in the
-  browser from raw shares; Python compiles data, the client owns geometry.
-- **Provenance and science stay honest.** Stage-1 row accounting ships in
-  the data (for a future About view); the separation finding (≈ 0, the
-  continuum) remains the method's result, printed by stage 2 and documented
-  below.
-
-Internal diagnostics (CSV only, deliberately not in any user-facing page):
-`class_extremes.csv` — per-class far-from-centroid recipes with inspection
-evidence, the maintainer's loop for finding stage-1 bugs; `outliers.csv` —
-the robust-Mahalanobis-dropped tail; `data_quality.csv` — mass share per
-density conversion basis; `unresolved_heads.csv` — the standing curation
-queue (see `src/method/quality.py`).
-
 ## Tests
 
 ```bash
@@ -249,3 +148,28 @@ the browser.
 
 Two consecutive stage-2 runs produce a byte-identical `bakers_aid.html` —
 the product is as deterministic as the dataset.
+
+## Caveats
+
+**This is a vibe-coded project.** The code is largely AI-generated, written
+with a language model over many sessions. It is carefully tested and
+reproducible, but treat the interpretations as a hobbyist's, not a paper's.
+
+**The preprocessing is approximate.** Ruhlman's five parts are a deliberate
+simplification: ingredient lines are parsed heuristically, densities and USDA
+decomposition are best-effort, the hardest ingredients are dropped, non-baked
+sections are excluded, and the join to Food.com is imperfect. The geometry is
+only as clean as that pipeline.
+
+## Data
+
+Three independent corpora meet at exactly one place: the numeric Food.com id
+at the end of each RecipeNLG link.
+
+- **RecipeNLG** (Bien et al. 2020) — raw ingredient text and source links.
+- **Food.com** (shuyangli94 on Kaggle, 2019) — tags (the independent class
+  labels) plus per-recipe nutrition.
+- **USDA FoodData Central SR Legacy 2018-04** — per-100 g proximates that
+  decompose each ingredient head into structural parts.
+
+See the app's About page for the full provenance and the stage-1 flow.

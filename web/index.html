@@ -19,6 +19,12 @@
   <nav class="navlinks">
     <a href="#app" id="nav-main" data-nav="app">app</a>
     <a href="#about" data-nav="about">about</a>
+    <a class="navicon" href="https://github.com/zyasserd/baking" target="_blank"
+      rel="noopener" aria-label="GitHub repository" title="GitHub repository">
+      <svg viewBox="0 0 16 16" aria-hidden="true" fill="currentColor">
+        <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/>
+      </svg>
+    </a>
   </nav>
 </header>
 
@@ -187,10 +193,40 @@
       </div>
     </div>
 
-    <p class="foot">Stage 1 is verified byte-identical across runs, and the
-      dataset is committed, so the Aid rebuilds without the raw download.
-      Everything is plain Python and vanilla JavaScript, with no framework and
-      no server.</p>
+    <h2>Full vs structural</h2>
+    <p class="muted">Two decomposition conventions were tested, and the choice
+      between them is the project's main methodological decision.</p>
+    <ul class="tips">
+      <li><b>Full</b> — every ingredient's USDA composition is pooled into the
+        parts, including add-ins (chocolate, nuts, fruit, cheese). A
+        chocolate-chip cookie's chocolate enters as sugar and fat.</li>
+      <li><b>Structural</b> — add-ins are <i>zeroed</i>: only structure-forming
+        ingredients count (flours, sugars, fats, eggs, dairy, water, leaveners,
+        salt, yeast), reproducing Ruhlman's clean ratio. One documented
+        exception: water-dominant add-ins (applesauce, pumpkin, banana,
+        zucchini, berries) contribute their water fraction to the liquid part;
+        their remaining parts stay zeroed.</li>
+    </ul>
+    <p>Describing the classes favors the add-in-excluding convention
+      (structural separation −0.005 vs −0.018 full), so <b>structural is what
+      the pipeline ships</b>. The full vector still exists internally — it
+      picks each ingredient's primary part for the density lookup — but it
+      never reaches the dataset.</p>
+
+    <h2>Caveats</h2>
+    <p><b>This is a vibe-coded project.</b> The code is largely AI-generated,
+      written with a language model over many sessions. It is carefully tested
+      and reproducible, but treat the interpretations as a hobbyist's, not a
+      paper's.</p>
+    <p><b>The preprocessing is approximate.</b> Ruhlman's five
+      parts are a deliberate simplification: ingredient lines are parsed
+      heuristically, densities and USDA decomposition are best-effort, the
+      hardest ingredients are dropped, non-baked sections are excluded, and the
+      join to Food.com is imperfect. The geometry is only as clean as that
+      pipeline.</p>
+
+    <p class="foot">Everything is plain Python and vanilla JavaScript, with no
+      framework and no server.</p>
   </div>
 </section>
 
