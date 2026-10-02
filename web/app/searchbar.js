@@ -35,6 +35,13 @@
     const connAt = i => conns[i] || defaultConn(tokens[i], tokens[i + 1]);
     const hideDropdown = () => { dropdown.style.display = "none"; };
 
+    // Current partition, so single letters A-D and "+" combinations resolve
+    // against the compartments shown on the plot.
+    const groupsOf = () => {
+      const st = store.get();
+      return st.groups || AID.resolveGroups(st.partition);
+    };
+
     function queryTokens() {
       const out = [];
       for (let i = 0; i < tokens.length; i++) {
@@ -246,7 +253,7 @@
     }
 
     input.addEventListener("input", () => {
-      suggestions = AID.suggest(input.value, data);
+      suggestions = AID.suggest(input.value, data, groupsOf());
       active = 0;
       renderDropdown();
       if (clearBtn) clearBtn.style.display = (tokens.length || input.value) ? "flex" : "none";

@@ -176,8 +176,9 @@ ratio space instead of looking at it.
   above the plot shows the partition as `[rest] | flour | wet | rich`: drag a
   pill to another compartment (or click it, then the compartment), drag it onto
   the `+` box to give it its own compartment, click a divider `|` to merge two
-  compartments, or a compartment's `+|` to peel one part off. Compartments carry numbered badges matching
-  the plot corners. In 3D, two corners that line up on screen show their badges
+  compartments, or a compartment's `+|` to peel one part off. Compartments carry lettered badges (A, B, C, D) matching
+  the plot corners, and those letters can be referenced in the search bar's
+  ratios. In 3D, two corners that line up on screen show their badges
   fused (the 4th vertex hidden behind its parent) and clicking that fused pair
   merges them. A split (2D→3D) turns the *regular* tetrahedron rigidly about the
   edge joining the two untouched corners: those two stay exactly on the 2D
@@ -192,9 +193,11 @@ ratio space instead of looking at it.
 - **Search drives the geometry.** The search bar takes typed chips:
   ingredients (resolved to the same USDA heads stage 1 uses, plural-
   insensitive), classes (in their palette color), name keywords, and ratio
-  ranges (`sugar 40-60%`, or merged targets like `rich`). Matches stay
-  full-color; everything else whispers to 4% opacity — you see *where in the
-  space* your search lives.
+  ranges (`sugar 40-60%`, merged targets like `rich`, `+` combinations like
+  `fat+sugar`, or a vertex letter `A`–`D`). Type a full equation
+  (`flour : fat = 2 : 1`, `fat+sugar : flour = 2 : 1`, `A : B = 2 : 1`) to
+  overlay it as a locus. Matches stay full-color; everything else whispers to
+  4% opacity — you see *where in the space* your search lives.
 - **Families filter.** The class legend above the plot is a row of family
   chips (cookie, cake, ...). Click one to isolate it, click several to combine
   (OR); the selection is ANDed with the search query. The weak-tier

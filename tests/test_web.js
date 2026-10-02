@@ -27,6 +27,7 @@ std.loadScript("web/app/search.js");
 /* ── palette ─────────────────────────────────────────────────────────── */
 ok(AID.colorOf("cookie") === "#e15759", "palette cookie");
 ok(AID.colorOf("unknown_class") === "#777777", "palette fallback");
+ok(AID.vertexName(0) === "A" && AID.vertexName(3) === "D", "vertex letters A-D");
 
 /* ── store ───────────────────────────────────────────────────────────── */
 {
@@ -222,6 +223,22 @@ ok(AID.colorOf("unknown_class") === "#777777", "palette fallback");
   ok(AID.parseRatioEq("flour : rocks = 2 : 1") === null, "reject unknown operand");
   ok(AID.parseRatioEq("flour : fat = 2 : 0") === null, "reject non-positive coefficient");
 
+  // "+" combinations and vertex letters
+  const combo = AID.parseRatioEq("fat+sugar : flour = 2 : 1");
+  ok(combo && combo.ops[0].idx.join(",") === "3,4" && combo.ops[1].idx[0] === 0,
+     "parse a + combination operand");
+  ok(AID.parseRatioEq("fat + sugar : flour = 2 : 1").ops[0].idx.join(",") === "3,4",
+     "combination tolerates spaces around +");
+  ok(AID.resolveOperand("fat+sugar").idx.join(",") === "3,4", "resolveOperand combination");
+  const groups = [[0], [1, 2], [3, 4]];
+  const byLetter = AID.parseRatioEq("A : B = 2 : 1", groups);
+  ok(byLetter && byLetter.ops[0].idx[0] === 0 && byLetter.ops[1].idx.join(",") === "1,2",
+     "vertex letters resolve against the partition");
+  ok(AID.parseRatioEq("A : B = 2 : 1") === null, "reject vertex letters without groups");
+  const sdata = { meta: { n: 0, classes: [] }, recipes: { name: [], cls: [], P: [] }, heads: [], index: {} };
+  ok(AID.suggest("a", sdata, groups).some(s => s.type === "ratio" && s.target.vertex === 0),
+     "suggest vertex A as a ratio target");
+
   // flour : fat = 2 : 1 -> p0 = 2 p3; four vertices, all on the simplex
   const verts = AID.ratioLocusVertices([
     { idx: [0], k: 2 }, { idx: [3], k: 1 },
@@ -244,6 +261,15 @@ ok(AID.colorOf("unknown_class") === "#777777", "palette fallback");
     close(v[0], 2 * v[3], 1e-6, "triple vertex flour = 2 fat");
     close(v[4], v[3] / 2, 1e-6, "triple vertex sugar = fat / 2");
   }
+
+  // five operands pin the composition to a single point (drawn as a marker)
+  const point = AID.ratioLocusVertices([
+    { idx: [0], k: 4 }, { idx: [1], k: 2 }, { idx: [2], k: 1 },
+    { idx: [3], k: 1 }, { idx: [4], k: 1 },
+  ]);
+  ok(point.length === 1, "five-operand locus is a single point");
+  close(point[0].reduce((a, b) => a + b, 0), 1, 1e-6, "point locus on the simplex");
+  close(point[0][0], 4 * point[0][3], 1e-6, "point locus satisfies the ratios");
 
   // convex hull
   const hull = AID.hull2([[0, 0], [1, 0], [1, 1], [0, 1], [0.5, 0.5]]);

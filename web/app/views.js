@@ -89,7 +89,7 @@
     g.lineWidth = 1.2; g.strokeStyle = "#262626"; g.stroke();
   }
 
-  /* Numbered vertex badge — matches the divider-bar compartment colour. */
+  /* Vertex badge (A/B/C/D) — matches the divider-bar compartment colour. */
   function vertexBadge(ctx, x, y, i) {
     ctx.beginPath();
     ctx.arc(x, y, 11, 0, 6.2832);
@@ -99,7 +99,7 @@
     ctx.font = "700 12px system-ui, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(String(i + 1), x, y + 0.5);
+    ctx.fillText(AID.vertexName(i), x, y + 0.5);
   }
 
   /* Hit radius for the fused-vertex merge handle (the two overlapping badges). */
@@ -205,13 +205,44 @@
   const LOCUS_FILL = "rgba(176, 122, 161, 0.14)";
   const LOCUS_EDGE = "rgba(150, 92, 138, 0.95)";
 
+  /* A ratio can pin a single point (more operands than the simplex has room
+   * for, or a slice that meets it at one vertex). A degenerate hull would
+   * draw nothing, so mark the point with a target ring that reads over dots. */
+  function drawLocusPoint(ctx, x, y) {
+    ctx.beginPath();
+    ctx.arc(x, y, 8.5, 0, 6.2832);
+    ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+    ctx.fill();
+    ctx.lineWidth = 2.4;
+    ctx.strokeStyle = LOCUS_EDGE;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x, y, 3, 0, 6.2832);
+    ctx.fillStyle = LOCUS_EDGE;
+    ctx.fill();
+  }
+
+  /* Draw the non-degenerate loci (regions/lines) in the background; return the
+   * screen positions of point-sized loci so the painter can mark them ON TOP of
+   * the cloud (a single point under 28k translucent dots would be invisible). */
   function drawLocus(ctx, eqs, toScreen) {
-    if (!eqs || !eqs.length) return;
+    const points = [];
+    if (!eqs || !eqs.length) return points;
     for (const eq of eqs) {
       const verts = AID.ratioLocusVertices(eq.ops);
-      if (verts.length < 2) continue;
-      const hull = AID.hull2(verts.map(toScreen));
-      if (hull.length < 2) continue;
+      if (verts.length < 1) continue;
+      const pts = verts.map(toScreen);
+      // screen spread: a locus that collapses to roughly a pixel is a point
+      let minx = Infinity, maxx = -Infinity, miny = Infinity, maxy = -Infinity;
+      for (const [x, y] of pts) {
+        if (x < minx) minx = x; if (x > maxx) maxx = x;
+        if (y < miny) miny = y; if (y > maxy) maxy = y;
+      }
+      const hull = AID.hull2(pts);
+      if (Math.max(maxx - minx, maxy - miny) < 8 || hull.length < 2) {
+        points.push([(minx + maxx) / 2, (miny + maxy) / 2]);
+        continue;
+      }
       ctx.save();
       ctx.beginPath();
       if (hull.length === 2) {
@@ -229,13 +260,22 @@
       ctx.stroke();
       ctx.restore();
     }
+    return points;
+  }
+
+  /* Point-sized loci, drawn last so they sit above the cloud. */
+  function drawLocusMarks(ctx, points) {
+    if (!points || !points.length) return;
+    for (const [x, y] of points) drawLocusPoint(ctx, x, y);
   }
 
   /* 1D locus: the slice projects to an interval on the axis, drawn as a band
-   * spanning every family row. */
+   * spanning every family row. A point-sized slice has no width, so it is
+   * returned for the caller to mark on top (see drawEqMark). */
   function drawEqBand(ctx, x0, x1, yTop, yBot) {
-    if (!isFinite(x0) || !isFinite(x1)) return;
+    if (!isFinite(x0) || !isFinite(x1)) return null;
     const left = Math.min(x0, x1), right = Math.max(x0, x1);
+    if (right - left < 6) return (left + right) / 2;
     ctx.save();
     ctx.fillStyle = LOCUS_FILL;
     ctx.fillRect(left, yTop, right - left, yBot - yTop);
@@ -246,6 +286,19 @@
     ctx.moveTo(left, yTop); ctx.lineTo(left, yBot);
     ctx.moveTo(right, yTop); ctx.lineTo(right, yBot);
     ctx.stroke();
+    ctx.restore();
+    return null;
+  }
+
+  /* Marker for a point-sized 1D locus, drawn above the rows. */
+  function drawEqMark(ctx, x, yTop, yBot) {
+    ctx.save();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+    ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.moveTo(x, yTop); ctx.lineTo(x, yBot); ctx.stroke();
+    ctx.strokeStyle = LOCUS_EDGE;
+    ctx.lineWidth = 2.6;
+    ctx.beginPath(); ctx.moveTo(x, yTop); ctx.lineTo(x, yBot); ctx.stroke();
     ctx.restore();
   }
 
@@ -346,9 +399,10 @@
 
       // ratio-equation locus (background guide), projected like the points
       const eqsV = this.store.get().ratioEqs;
+      let locusPts = [];
       if (eqsV && eqsV.length) {
         const self = this;
-        drawLocus(ctx, eqsV, raw => {
+        locusPts = drawLocus(ctx, eqsV, raw => {
           const bb = AID.bary([raw], groups);
           const o = [0, 0];
           AID.project2(bb, o);
@@ -443,7 +497,10 @@
         ctx.stroke();
       }
 
-      // numbered corner badges + labels (match the divider-bar compartments)
+      // point-sized ratio loci, above the cloud
+      drawLocusMarks(ctx, locusPts);
+
+      // corner badges + labels (match the divider-bar compartments)
       const cen = [this.sx(0.5), this.sy(0.8660254 / 3)];
       AID.TRI2.forEach((v, i) => {
         const vx = this.sx(v[0]), vy = this.sy(v[1]);
@@ -553,17 +610,20 @@
 
       // ratio-equation locus (background band) spanning every family row
       const eqsV = this.store.get().ratioEqs;
+      const eqMarks = [];
       if (eqsV && eqsV.length) {
         for (const eq of eqsV) {
           const verts = AID.ratioLocusVertices(eq.ops);
-          if (verts.length < 2) continue;
+          if (verts.length < 1) continue;
           let lo = Infinity, hi = -Infinity;
           for (const raw of verts) {
             const v = AID.bary([raw], groups)[0] * 100;
             if (v < lo) lo = v;
             if (v > hi) hi = v;
           }
-          drawEqBand(ctx, sx(Math.max(X0, lo)), sx(Math.min(X1, hi)), TOP, H - 30);
+          if (hi < X0 || lo > X1) continue; // slice is off-screen
+          const mark = drawEqBand(ctx, sx(Math.max(X0, lo)), sx(Math.min(X1, hi)), TOP, H - 30);
+          if (mark != null) eqMarks.push(mark);
         }
       }
 
@@ -714,7 +774,10 @@
         }
       }
 
-      // numbered corner badges: group 0 at the right (100%), its complement left
+      // point-sized ratio loci, above the rows
+      for (const x of eqMarks) drawEqMark(ctx, x, TOP, H - 30);
+
+      // corner badges: group 0 at the right (100%), its complement left
       const anchors = [[plotR - 6, 22]];
       if (groups.length > 1) anchors[1] = [plotL + 6, 22];
       anchors.forEach((a, i) => {
@@ -857,8 +920,9 @@
 
       // ratio-equation locus (background guide), reprojected with the camera
       const eqsV = this.store.get().ratioEqs;
+      let locusPts = [];
       if (eqsV && eqsV.length) {
-        drawLocus(ctx, eqsV, raw => {
+        locusPts = drawLocus(ctx, eqsV, raw => {
           const bb = AID.bary([raw], groups);
           AID.project3(bb, yaw, pitch, tmp);
           return [sx(tmp[0]), sy(tmp[1])];
@@ -1011,18 +1075,21 @@
             ctx.lineWidth = 2.5; ctx.strokeStyle = "#262626"; ctx.stroke();
           }
 
-          // compartment numbers, pinned to the outer ends of the fused shape
+          // compartment letters, pinned to the outer ends of the fused shape
           ctx.fillStyle = "#fff";
           ctx.font = "700 12px system-ui, sans-serif";
           ctx.textAlign = "center"; ctx.textBaseline = "middle";
           const ex = ax - Math.cos(th) * r * 0.5, ey = ay - Math.sin(th) * r * 0.5;
           const fx = bx + Math.cos(th) * r * 0.5, fy = by + Math.sin(th) * r * 0.5;
-          ctx.fillText(String(mp.i + 1), ex, ey + 0.5);
-          ctx.fillText(String(mp.j + 1), fx, fy + 0.5);
+          ctx.fillText(AID.vertexName(mp.i), ex, ey + 0.5);
+          ctx.fillText(AID.vertexName(mp.j), fx, fy + 0.5);
         }
       }
 
-      // numbered corner badges + labels (the fused pair is drawn above)
+      // point-sized ratio loci, above the cloud
+      drawLocusMarks(ctx, locusPts);
+
+      // corner badges + labels (the fused pair is drawn above)
       AID.project3([0.25, 0.25, 0.25, 0.25], yaw, pitch, tmp);
       const cen = [sx(tmp[0]), sy(tmp[1])];
       const pair = this.mergePair;

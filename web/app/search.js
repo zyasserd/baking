@@ -1,8 +1,8 @@
 /* Search: token suggestions and query execution. Pure, no DOM.
  *
  * Token types: ingredient (resolved USDA head, colored green), class (the
- * tag-class palette color), keyword (name substring, amber), ratio (part or
- * merged group with a min/max % range, blue).
+ * tag-class palette color), keyword (name substring, amber), ratio (a part,
+ * a "+" combination, or a vertex letter A-D with a min/max % range, blue).
  *
  * Semantics: OR within the ingredient group (find recipes with any of the
  * listed ingredients), AND across everything else. The user may also type
@@ -38,16 +38,25 @@
   ];
 
   /* Suggestions for the typed text: ingredients (ranked by match + count),
-   * classes, ratio targets, and a keyword fallback. */
-  AID.suggest = function (text, data) {
+   * classes, ratio targets, and a keyword fallback. `groups` is the current
+   * partition (optional) so single letters A-D and "+" combinations resolve. */
+  AID.suggest = function (text, data, groups) {
     const q = AID.normQuery(text);
     if (!q) return [];
     const out = [];
 
     // a complete ratio equation ("flour : fat = 2 : 1") is its own token
     if (text.indexOf(":") >= 0 && text.indexOf("=") >= 0) {
-      const eq = AID.parseRatioEq(text);
+      const eq = AID.parseRatioEq(text, groups);
       if (eq) return [eq];
+    }
+
+    // a bare "+" combination of parts ("fat+sugar") is a ratio target
+    if (text.indexOf("+") >= 0) {
+      const combo = AID.resolveOperand(text, groups);
+      if (combo && combo.label) {
+        out.push({ type: "ratio", label: combo.label, target: combo });
+      }
     }
 
     // explicit boolean connectors
@@ -87,11 +96,27 @@
       }
     }
 
+    // a single letter A-D names the current partition's compartment
+    if (groups) {
+      for (let i = 0; i < groups.length; i++) {
+        if (AID.vertexName(i).toLowerCase() !== q) continue;
+        const label = AID.vertexName(i) + " (" + groupText(groups[i]) + ")";
+        out.push({
+          type: "ratio", label,
+          target: { label, idx: groups[i].slice(), key: "vertex", vertex: i },
+        });
+      }
+    }
+
     if (out.length === 0) {
       out.push({ type: "keyword", label: text.trim() });
     }
     return out;
   };
+
+  function groupText(idx) {
+    return idx.map(p => AID.PART_NAMES[p]).join("+");
+  }
 
   function classCount(cls, data) {
     let n = 0;
@@ -161,7 +186,9 @@
   AID.RATIO_TARGETS = RATIO_TARGETS;
 
   /* Operands accepted by a ratio equation: the five parts plus the two
-   * canonical merges, looked up by normalized name. */
+   * canonical merges, looked up by normalized name. A "+"-joined sum of these
+   * is also an operand (e.g. "fat+sugar"), and a single letter A-D names the
+   * current partition's compartment. */
   const EQ_OPERANDS = [
     { label: "flour", idx: [0] },
     { label: "fat", idx: [3] },
@@ -174,9 +201,35 @@
   const EQ_BY_NAME = {};
   for (const o of EQ_OPERANDS) EQ_BY_NAME[AID.normQuery(o.label)] = o;
 
-  /* Parse "flour : fat = 2 : 1" (two or more terms each side) into a ratioeq
-   * token, or null when the text is not a complete, valid equation. */
-  AID.parseRatioEq = function (text) {
+  /* Resolve one term to { idx, label } (or null): a vertex letter (A-D) via
+   * the current groups, otherwise a "+"-joined sum of known operands. */
+  AID.resolveOperand = function (term, groups) {
+    const t = String(term).trim();
+    if (!t) return null;
+    const letter = /^([a-dA-D])$/.exec(t);
+    if (letter) {
+      const i = letter[1].toUpperCase().charCodeAt(0) - 65;
+      if (groups && groups[i]) {
+        return { idx: groups[i].slice(), label: letter[1].toUpperCase(), vertex: i };
+      }
+      return null;
+    }
+    const words = t.split("+").map(s => s.trim()).filter(Boolean);
+    if (!words.length) return null;
+    const idx = [], labels = [];
+    for (const w of words) {
+      const op = EQ_BY_NAME[AID.normQuery(w)];
+      if (!op) return null;
+      for (const j of op.idx) if (idx.indexOf(j) < 0) idx.push(j);
+      labels.push(op.label);
+    }
+    return idx.length ? { idx, label: labels.join("+") } : null;
+  };
+
+  /* Parse "flour : fat = 2 : 1", "fat+sugar : flour = 2 : 1" or "A : B = 2 : 1"
+   * (two or more terms each side) into a ratioeq token, or null when the text
+   * is not a complete, valid equation. */
+  AID.parseRatioEq = function (text, groups) {
     if (text.indexOf(":") < 0 || text.indexOf("=") < 0) return null;
     const sides = text.split("=");
     if (sides.length !== 2) return null;
@@ -185,7 +238,7 @@
     if (left.length < 2 || left.length !== right.length) return null;
     const ops = [];
     for (let i = 0; i < left.length; i++) {
-      const op = EQ_BY_NAME[AID.normQuery(left[i])];
+      const op = AID.resolveOperand(left[i], groups);
       const k = Number(right[i]);
       if (!op || !isFinite(k) || k <= 0) return null;
       ops.push({ idx: op.idx.slice(), label: op.label, k });

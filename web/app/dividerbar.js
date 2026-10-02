@@ -2,8 +2,8 @@
  *
  * Reading left to right: a dashed `rest` box (inactive parts), then the active
  * compartments separated by dividers `|`, parts inside a compartment joined by
- * `+`. Each compartment carries a numbered badge coloured to match its plot
- * vertex.
+ * `+`. Each compartment carries a lettered badge (A, B, C, D) coloured to match
+ * its plot vertex.
  *
  * Editing:
  *   - drag a pill onto a compartment (or the rest box) to regroup it;
@@ -124,7 +124,7 @@
         const badge = document.createElement("em");
         badge.className = "rbadge";
         badge.style.background = AID.vertexColor(i);
-        badge.textContent = String(i + 1);
+        badge.textContent = AID.vertexName(i);
         comp.appendChild(badge);
         g.forEach((p, k) => {
           if (k) {

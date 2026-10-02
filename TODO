@@ -1,13 +1,4 @@
-- instead of 1, 2, 3, 4 for the vertices
-    - call them A, B, C, D so that you are able to reference that in the ratios in the serch bar
-- allow us to refer to combinations
-    - liquid + egg = wet
-    - fat + sugar = ?
-- `fat+sugar : floor = 2:1` doesn't work
-
-- search bar alignment is a bit weird
-
-- simplify
+- search bar alignment is a bit weird also there is both reset buttons and an x button inside, remove the reset
 
 - github
     - upload
@@ -17,7 +8,11 @@
     - also the fact the the preprocessing is not perfect
     - add github link
 
+- qjs
+
 ---
+
+- simplify
 
 - usefulness
 

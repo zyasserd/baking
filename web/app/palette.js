@@ -18,10 +18,17 @@
     return AID.palette[cls] || "#777777";
   };
 
-  /* Per-vertex colours, indexed by compartment slot (1-based labels on the
-   * plot); shared by the divider bar and the canvas badges. */
+  /* Per-vertex colours, indexed by compartment slot; shared by the divider bar
+   * and the canvas badges. */
   AID.VERTEX_COLORS = ["#4e79a7", "#f28e2b", "#59a14f", "#b07aa1", "#e15757"];
   AID.vertexColor = function (i) {
     return AID.VERTEX_COLORS[i % AID.VERTEX_COLORS.length];
+  };
+
+  /* Vertex labels are letters (A, B, C, D), matching the plot corner badges and
+   * the divider-bar compartments, so a compartment can be named in a ratio. */
+  AID.VERTEX_LABELS = ["A", "B", "C", "D"];
+  AID.vertexName = function (i) {
+    return AID.VERTEX_LABELS[i] || String(i + 1);
   };
 })();
