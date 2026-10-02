@@ -85,8 +85,32 @@
         #    not the pipeline), so a wrong/drifted file fails loudly instead of
         #    silently changing the labels.
         food-recipes-sha256 = "6a8136d1da9e03396a9f52d72200b3fddb8fe103f11e1496effca30ac4e0539f";
+
+        # ══════════════════════════════════════════════════════════════════════
+        # WEBSITE — the Aid, built as a plain derivation. Stage 2 runs from the
+        # *committed* dataset (plus config/web/src) and packs web/ into one
+        # self-contained HTML, so this builds with no raw corpora, no Kaggle
+        # login and no network. The result is a GitHub-Pages-ready directory:
+        # ``index.html`` is the Aid itself.
+        # ══════════════════════════════════════════════════════════════════════
+        website = pkgs.runCommand "bakers-aid-site" {
+          nativeBuildInputs = [ pythonEnv ];
+        } ''
+          cp -r ${self} work
+          chmod -R u+w work
+          cd work
+          python scripts/analyze.py \
+            --input data/processed/recipes_simplex.csv \
+            --outdir output
+          mkdir -p $out
+          cp output/bakers_aid.html $out/index.html
+        '';
       in
       {
+        # `nix build` (or `nix build .#website`) -> ./result/index.html
+        packages.default = website;
+        packages.website = website;
+
         # Manual fetch targets (optional): `nix build .#recipe-nlg` etc.
         packages.recipe-nlg = recipe-nlg;
         packages.fdc-sr-legacy = fdc-sr-legacy;

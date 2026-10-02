@@ -13,6 +13,8 @@ from src.dataset import PROPORTION_COLUMNS
 
 
 def make_frame(n: int = 4) -> pd.DataFrame:
+    ings = ["['butter', 'chocolate chips']", "['butter']",
+            "['yeast', 'firmly packed brown sugar']", "['vanilla']"]
     rows = []
     for i in range(n):
         row = {"recipe_id": str(100 + i), "name": f"Recipe {i}",
@@ -20,6 +22,7 @@ def make_frame(n: int = 4) -> pd.DataFrame:
                "flour_g": 100.0, "sugar_g": 50.0, "fat_g": 25.0,
                "egg_g": 10.0, "milk_g": 5.0, "water_g": 0.0,
                "salt_g": 1.0, "leavener_g": 2.0, "yeast_g": 0.0,
+               "ingredients_raw": ings[i % len(ings)],
                "url": "www.food.com/recipe/r-" + str(100 + i)}
         for j, col in enumerate(PROPORTION_COLUMNS):
             row[col] = round(0.1 + 0.2 * j, 6)
@@ -31,23 +34,12 @@ def make_frame(n: int = 4) -> pd.DataFrame:
     return df
 
 
-@pytest.fixture
-def ing_csv(tmp_path, monkeypatch):
-    path = tmp_path / "ingredients.csv"
-    pd.DataFrame({
-        "recipe_id": ["100", "100", "101", "102", "999"],
-        "head": ["butter", "chocolate chips", "butter", "yeast", "vanilla"],
-    }).to_csv(path, index=False)
-    monkeypatch.setattr(config, "INTERIM_INGREDIENTS_CSV", str(path))
-    return path
-
-
 def parse_data_js(text: str) -> dict:
     assert text.startswith("AID_DATA = ") and text.endswith(";\n")
     return json.loads(text[len("AID_DATA = "):-2])
 
 
-def test_build_data_roundtrip(tmp_path, ing_csv):
+def test_build_data_roundtrip(tmp_path):
     df = make_frame()
     path = aid_web.build_data(df, str(tmp_path))
     data = parse_data_js(open(path, encoding="utf-8").read())
@@ -61,36 +53,35 @@ def test_build_data_roundtrip(tmp_path, ing_csv):
         assert abs(sum(row) - 1.0) < 1e-3
 
 
-def test_build_data_ingredient_index(tmp_path, ing_csv):
+def test_build_data_ingredient_index(tmp_path):
     df = make_frame()
     path = aid_web.build_data(df, str(tmp_path))
     data = parse_data_js(open(path, encoding="utf-8").read())
 
-    assert data["heads"] == ["butter", "chocolate chips", "yeast"]
+    assert data["heads"] == ["brown sugar", "butter", "chocolate chips",
+                             "vanilla", "yeast"]
     assert data["index"]["butter"] == [0, 1]
     assert data["index"]["chocolate chips"] == [0]
+    assert data["index"]["brown sugar"] == [2]
     assert data["index"]["yeast"] == [2]
-    # heads with no visible recipe (the "999" row) are dropped, not left empty
-    assert "vanilla" not in data["index"]
+    assert data["index"]["vanilla"] == [3]
 
 
-def test_build_data_index_survives_int_recipe_ids(tmp_path, ing_csv):
-    """The dataset loader coerces recipe_id to int; the interim file is text.
+def test_build_data_index_parses_and_dedupes(tmp_path):
+    """Heads come from parsing ingredients_raw (prep words stripped, deduped).
 
-    This mismatch once emptied every index list (search matched nothing), so
-    pin it with integer ids here — the fixture's interim csv is text.
+    The index no longer touches recipe_id, so integer ids are safe here.
     """
     df = make_frame()
     df["recipe_id"] = df["recipe_id"].astype(int)
+    df.loc[0, "ingredients_raw"] = "['1/2 cup firmly packed brown sugar', 'brown sugar']"
     path = aid_web.build_data(df, str(tmp_path))
     data = parse_data_js(open(path, encoding="utf-8").read())
 
-    assert data["heads"] == ["butter", "chocolate chips", "yeast"]
-    assert data["index"]["butter"] == [0, 1]
-    assert sum(len(v) for v in data["index"].values()) == 4
+    assert data["index"]["brown sugar"] == [0, 2]
 
 
-def test_build_data_percentiles_and_archetypes(tmp_path, ing_csv):
+def test_build_data_percentiles_and_archetypes(tmp_path):
     df = make_frame()
     path = aid_web.build_data(df, str(tmp_path))
     data = parse_data_js(open(path, encoding="utf-8").read())
@@ -103,14 +94,14 @@ def test_build_data_percentiles_and_archetypes(tmp_path, ing_csv):
         assert abs(sum(a["P"]) - 1.0) < 1e-3
 
 
-def test_build_data_deterministic(tmp_path, ing_csv):
+def test_build_data_deterministic(tmp_path):
     df = make_frame()
     a = aid_web.build_data(df, str(tmp_path / "a"))
     b = aid_web.build_data(df, str(tmp_path / "b"))
     assert open(a, "rb").read() == open(b, "rb").read()
 
 
-def test_pack_inlines_everything(tmp_path, ing_csv):
+def test_pack_inlines_everything(tmp_path):
     df = make_frame()
     aid_web.build_data(df, str(tmp_path))
     path = aid_pack.pack(str(tmp_path))
@@ -121,7 +112,7 @@ def test_pack_inlines_everything(tmp_path, ing_csv):
     assert "Baker's Aid" in html
 
 
-def test_pack_deterministic_and_escapes_script(tmp_path, ing_csv):
+def test_pack_deterministic_and_escapes_script(tmp_path):
     df = make_frame()
     df.loc[0, "name"] = 'Cake </script><script>alert(1)</script>'
     out_a, out_b = str(tmp_path / "a"), str(tmp_path / "b")
@@ -139,15 +130,13 @@ def test_pack_deterministic_and_escapes_script(tmp_path, ing_csv):
     assert payload["recipes"]["name"][0] == 'Cake </script><script>alert(1)</script>'
 
 def test_real_dataset_index_is_populated():
-    """Integration: the committed dataset + interim index must not be empty.
+    """Integration: the committed dataset must yield a populated index.
 
-    Skips when the gitignored interim file has not been built (fresh clone),
-    but runs in the normal dev checkout — where the empty-index bug lived.
+    Runs in the normal checkout; skips on a fresh clone without the dataset.
     """
     import os
-    if not (os.path.exists(config.PROCESSED_RECIPES_CSV)
-            and os.path.exists(config.INTERIM_INGREDIENTS_CSV)):
-        pytest.skip("dataset/interim not built")
+    if not os.path.exists(config.PROCESSED_RECIPES_CSV):
+        pytest.skip("dataset not built")
     from src import dataset
     df, _ = dataset.load_recipes(config.PROCESSED_RECIPES_CSV)
     heads, index = aid_web._ingredient_index(df)

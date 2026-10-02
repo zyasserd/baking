@@ -8,9 +8,11 @@ deterministic order:
   filtering happens client-side. Shares come straight from the dataset
   contract columns, so the data.js is reproducible from the committed
   dataset alone.
-- ``heads`` + ``index`` — the ingredient-search index: the distinct USDA
-  heads stage 1 assigned (sorted) and, per head, the sorted positions of the
-  recipes listing it (any ingredient line recorded for the recipe).
+- ``heads`` + ``index`` — the ingredient-search index: the distinct parsed
+  ingredient heads (sorted) and, per head, the sorted positions of the
+  recipes listing it. Parsed from the dataset's own ``ingredients_raw`` column
+  (the Food.com names), so the Aid rebuilds from the committed dataset alone —
+  no stage-1 interim file required.
 - ``archetypes`` — the book ratios as closed shares, projected identically
   to recipes in every partition.
 - ``percentiles`` — per class and part, the p05/p25/p50/p75/p95 of the share
@@ -21,6 +23,7 @@ deterministic order:
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 
@@ -47,29 +50,44 @@ def _recipes(df: pd.DataFrame) -> dict:
     }
 
 
+def _literal_list(value: object) -> list[str]:
+    """Parse the dataset's stringified ingredient list; [] on anything odd."""
+    if not isinstance(value, str) or not value:
+        return []
+    try:
+        parsed = ast.literal_eval(value)
+    except (ValueError, SyntaxError):
+        return []
+    if isinstance(parsed, list):
+        return [str(x) for x in parsed]
+    return [str(parsed)]
+
+
 def _ingredient_index(df: pd.DataFrame) -> tuple[list[str], dict[str, list[int]]]:
     """Distinct heads (sorted) and, per head, the positions of recipes listing it.
 
+    Built from the dataset's own ``ingredients_raw`` column (the Food.com
+    ingredient names), so the Aid regenerates from the committed dataset alone —
+    no stage-1 interim file. Each line is normalized by the same parser stage 1
+    used (``src.preprocess.parse``), so preparation words drop and spelling
+    variants merge (``"firmly packed brown sugar"`` -> ``"brown sugar"``).
+
     Positions refer to the recipe arrays' order, so index lists stay small
-    integers and the search is a pure set intersection in the browser.
-
-    recipe_id is compared as text: the dataset loader coerces the CSV column
-    to int64 while the interim file is read as str, and an int/str mismatch here
-    silently emptied every index list. Heads with no visible recipe (e.g. only
-    on a hidden dessert_other) are dropped — a suggestion that matches nothing
-    is worse than no suggestion.
+    integers and the search is a pure set intersection in the browser. Heads
+    with no visible recipe are dropped — a suggestion that matches nothing is
+    worse than no suggestion.
     """
-    ing = pd.read_csv(
-        config.INTERIM_INGREDIENTS_CSV, usecols=["recipe_id", "head"],
-        dtype={"recipe_id": str, "head": str},
-    ).dropna().drop_duplicates()
+    from ..preprocess import parse
 
-    pos = {str(rid): i for i, rid in enumerate(df["recipe_id"])}
-    bucket: dict[str, list[int]] = {}
-    for rid, head in zip(ing["recipe_id"], ing["head"]):
-        i = pos.get(rid)
-        if i is not None:
-            bucket.setdefault(head, []).append(i)
+    if "ingredients_raw" not in df.columns:
+        return [], {}
+
+    bucket: dict[str, set[int]] = {}
+    for i, raw in enumerate(df["ingredients_raw"]):
+        for line in _literal_list(raw):
+            head = parse.parse_ingredient(line).head
+            if head:
+                bucket.setdefault(head, set()).add(i)
 
     index = {head: sorted(rows) for head, rows in bucket.items()}
     return sorted(index), index

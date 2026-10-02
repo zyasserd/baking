@@ -55,8 +55,9 @@ tests/test_web.js          JS smoke tests, executed by qjs (QuickJS, staged
 data/
   raw/                     raw corpora (gitignored): nix-staged store
                            symlinks + the manual Kaggle download
-  interim/                 derived stage-1 artifacts (gitignored):
-                           fdc_srlegacy.csv, ingredients.csv
+  interim/                 derived stage-1 artifacts (gitignored; the Aid
+                           rebuilds without them): fdc_srlegacy.csv,
+                           ingredients.csv (stage-2 diagnostics only)
   processed/               THE PREPROCESSED DATASET (committed)
     recipes_simplex.csv
     provenance.json
@@ -116,6 +117,17 @@ file://. To hack on the UI, edit `web/` and reload the page directly: the
 shell references `../output/aid/data.js` and the app files by relative path,
 so the dev loop needs no build step and no server. Rerun stage 2 only when
 the data changes.
+
+### Build the website (Nix)
+
+```bash
+nix build .#website        # -> ./result/index.html (the self-contained Aid)
+```
+
+Runs stage 2 from the committed dataset and packs `web/` inside the Nix
+sandbox — no raw corpora, no network. The output is byte-identical to the
+local `scripts/analyze.py` run above. CI publishes it to GitHub Pages
+(`.github/workflows/pages.yml`).
 
 ## What the pipeline computes
 
@@ -191,8 +203,8 @@ ratio space instead of looking at it.
   Book archetypes (★, Ruhlman's *Ratio*) are defined on the same five parts, so
   they project identically in every partition — reference stars everywhere.
 - **Search drives the geometry.** The search bar takes typed chips:
-  ingredients (resolved to the same USDA heads stage 1 uses, plural-
-  insensitive), classes (in their palette color), name keywords, and ratio
+  ingredients (resolved by stage-1's parser, plural-insensitive), classes (in
+  their palette color), name keywords, and ratio
   ranges (`sugar 40-60%`, merged targets like `rich`, `+` combinations like
   `fat+sugar`, or a vertex letter `A`–`D`). Type a full equation
   (`flour : fat = 2 : 1`, `fat+sugar : flour = 2 : 1`, `A : B = 2 : 1`) to
