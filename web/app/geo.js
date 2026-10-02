@@ -255,6 +255,26 @@
     return oi >= 0 ? oi : null;
   };
 
+  /* When a partition drops from four groups to three, which two of the old
+   * groups were combined? Every part of one new group comes from exactly two
+   * old groups; returns [mergedParent, absorbed] (parent first, so slot i is
+   * the kept corner) or null if the change was not a merge. */
+  AID.mergedPair = function (oldGroups, newGroups) {
+    if (oldGroups.length !== 4 || newGroups.length !== 3) return null;
+    for (const ng of newGroups) {
+      const parts = new Set(ng), src = [];
+      for (let k = 0; k < oldGroups.length; k++) {
+        if (oldGroups[k].every(p => parts.has(p))) src.push(k);
+      }
+      if (src.length === 2) {
+        const covered = new Set();
+        for (const k of src) for (const p of oldGroups[k]) covered.add(p);
+        if (covered.size === parts.size) return [src[0], src[1]];
+      }
+    }
+    return null;
+  };
+
   /* Simple-ratio readout: parts per 100 flour, "100 : 50 : 50 : 100 : 100"
    * in display order (flour : fat : sugar : liquid : egg). */
   AID.readout = function (row) {
@@ -319,6 +339,51 @@
     return { name: best.name, d: bd };
   };
 
+  /* Per-class centroid = arithmetic mean of the class's share rows (the same
+   * point the plot's diamond marks). Memoized: the panel asks on every
+   * selection. */
+  let _centroids = null;
+  function classCentroidMap(P, cls) {
+    if (_centroids && _centroids.P === P) return _centroids.map;
+    const sums = {}, cnt = {}, map = {};
+    for (let i = 0; i < P.length; i++) {
+      const c = cls[i];
+      let s = sums[c];
+      if (!s) { s = sums[c] = [0, 0, 0, 0, 0]; cnt[c] = 0; }
+      for (let j = 0; j < 5; j++) s[j] += P[i][j];
+      cnt[c]++;
+    }
+    for (const c in sums) map[c] = sums[c].map(v => v / cnt[c]);
+    _centroids = { P, map };
+    return map;
+  }
+
+  /* Nearest class centroid by Aitchison distance (Euclidean in ILR). */
+  AID.nearestCentroid = function (Prow, P, cls) {
+    const map = classCentroidMap(P, cls);
+    const z = ilrRow(replaceZeros(Prow), PSI5);
+    let best = null, bd = Infinity;
+    for (const c in map) {
+      const zc = ilrRow(replaceZeros(map[c]), PSI5);
+      let d = 0;
+      for (let i = 0; i < z.length; i++) { const e = z[i] - zc[i]; d += e * e; }
+      d = Math.sqrt(d);
+      if (d < bd) { bd = d; best = c; }
+    }
+    return { name: best, d: bd };
+  };
+
+  /* ── Neighbourhood radius ──────────────────────────────────────────────
+   *
+   * A fixed radius in the partition's own frame — a unit-edge regular simplex —
+   * so the neighbourhood is the same set of recipes however far you zoom or
+   * rotate. It is a composition distance, not a screen size. One group gives an
+   * interval on the axis, three a disc in the triangle, four a sphere in the
+   * tetrahedron. Measured as Euclidean distance in the simplex: |Δb|²/2, where
+   * b are the group barycentric coordinates (see frameNeighbours in views.js). */
+
+  AID.NEIGHBOURHOOD_R = 0.05;
+
   /* Percentile of v within a class distribution given [p05,p25,p50,p75,p95],
    * piecewise-linear in between (below p05 -> 0-5, above p95 -> 95-100). */
   AID.percentileOf = function (v, qs) {
@@ -333,6 +398,107 @@
       }
     }
     return 50;
+  };
+
+  /* ── Ratio equation locus ────────────────────────────────────────────────
+   *
+   * A ratio equation ("flour : fat = 2 : 1", or more terms) pins a linear
+   * relation among raw part shares: k_j * G_i - k_i * G_j = 0 for every pair,
+   * where G_i is the share summed over operand i's parts. Intersected with the
+   * simplex (sum = 1, p >= 0) this is a convex polytope. Its vertices are the
+   * basic feasible solutions: pick `r` parts to be nonzero (r = #equations),
+   * solve the square system, and keep the solutions with p >= 0. The painters
+   * project these and take their convex hull — a line, a plane or a point,
+   * depending on the view. Pure and DOM-free, so it is unit tested. */
+
+  /* Ops: [{ idx: [partIndex...], k: number }, ...], at least two. Returns an
+   * array of raw 5-share rows. */
+  AID.ratioLocusVertices = function (ops) {
+    const r = ops ? ops.length : 0;
+    if (r < 2 || r > 5) return [];
+
+    // r equations over the five parts: the simplex sum plus (r-1) ratios.
+    const rows = [[1, 1, 1, 1, 1]];
+    const rhs = [1];
+    const k0 = ops[0].k;
+    for (let j = 1; j < r; j++) {
+      const row = [0, 0, 0, 0, 0];
+      for (const t of ops[0].idx) row[t] += ops[j].k;
+      for (const t of ops[j].idx) row[t] -= k0;
+      rows.push(row);
+      rhs.push(0);
+    }
+
+    const verts = [];
+    const seen = new Set();
+    for (const comb of combinations(5, r)) {
+      const A = rows.map(row => comb.map(c => row[c]));
+      const x = solveSquare(A, rhs.slice());
+      if (!x || x.some(v => v < -1e-9)) continue;
+      const p = [0, 0, 0, 0, 0];
+      comb.forEach((c, i) => { p[c] = x[i] < 0 ? 0 : x[i]; });
+      const key = p.map(v => v.toFixed(6)).join(",");
+      if (seen.has(key)) continue;
+      seen.add(key);
+      verts.push(p);
+    }
+    return verts;
+  };
+
+  /* All combinations of `k` indices from 0..n-1. */
+  function combinations(n, k) {
+    const out = [];
+    const rec = (start, acc) => {
+      if (acc.length === k) { out.push(acc.slice()); return; }
+      for (let i = start; i < n; i++) { acc.push(i); rec(i + 1, acc); acc.pop(); }
+    };
+    rec(0, []);
+    return out;
+  }
+
+  /* Solve A x = b for square A (Gauss-Jordan); null when singular. */
+  function solveSquare(A, b) {
+    const m = b.length;
+    for (let c = 0; c < m; c++) {
+      let piv = c;
+      for (let r = c + 1; r < m; r++) if (Math.abs(A[r][c]) > Math.abs(A[piv][c])) piv = r;
+      if (Math.abs(A[piv][c]) < 1e-12) return null;
+      const tA = A[c]; A[c] = A[piv]; A[piv] = tA;
+      const tb = b[c]; b[c] = b[piv]; b[piv] = tb;
+      for (let r = 0; r < m; r++) {
+        if (r === c) continue;
+        const f = A[r][c] / A[c][c];
+        if (!f) continue;
+        for (let cc = c; cc < m; cc++) A[r][cc] -= f * A[c][cc];
+        b[r] -= f * b[c];
+      }
+    }
+    const x = new Array(m);
+    for (let i = 0; i < m; i++) x[i] = b[i] / A[i][i];
+    return x;
+  }
+
+  /* 2D convex hull (monotone chain), counter-clockwise. */
+  AID.hull2 = function (points) {
+    const pts = points.slice().sort((a, b) => (a[0] - b[0]) || (a[1] - b[1]));
+    if (pts.length < 3) return pts;
+    const cross = (o, a, b) =>
+      (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+    const lower = [];
+    for (const p of pts) {
+      while (lower.length >= 2 &&
+        cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+      lower.push(p);
+    }
+    const upper = [];
+    for (let i = pts.length - 1; i >= 0; i--) {
+      const p = pts[i];
+      while (upper.length >= 2 &&
+        cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+      upper.push(p);
+    }
+    lower.pop(); upper.pop();
+    return lower.concat(upper);
   };
 
 })();

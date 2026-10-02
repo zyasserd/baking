@@ -12,6 +12,19 @@
 
   const PT_R = 2.2, HOVER_R = 6, SEL_R = 8;
 
+  /* Dot opacity. Points are always translucent so overlaps *blend* (same-class
+   * overlaps deepen toward the class colour, different classes mix) instead of
+   * one opaque dot hiding the ones beneath it. No dot is ever drawn opaque —
+   * opacity carries state, size carries depth, and the selected dot is marked
+   * by its ring, not by covering everything under it. */
+  const A_IDLE = 0.30, A_ACTIVE = 0.62, A_DIM = 0.06, A_CHOSEN = 0.85;
+
+  /* One dot style for both simplex views: identical radius and opacity in 2D
+   * and 3D, so changing dimension never changes how the cloud looks. */
+  function dotRadius(v) {
+    return v.active ? PT_R + (v.context ? 0.4 : 0) : PT_R - 0.5;
+  }
+
   /* deterministic per-point jitter in [-1, 1] (violin strips) */
   function jitter(i) {
     const s = Math.sin((i + 1) * 127.1) * 43758.5453;
@@ -51,6 +64,7 @@
   function makeBase(cache, data, store) {
     return {
       cache, data, store,
+      nb: null, // set by draw(): the current screen-space neighbourhood
       sel: () => store.get().selection,
       /* archetype frame coords for this partition */
       archBary: AID.bary(data.archetypes.map(a => a.P), cache.groups),
@@ -67,6 +81,9 @@
     }
     g.closePath();
     g.fill();
+    // white casing + dark edge so the star reads over the point cloud
+    g.lineWidth = 3; g.strokeStyle = "#fff"; g.stroke();
+    g.lineWidth = 1.2; g.strokeStyle = "#262626"; g.stroke();
   }
 
   /* Numbered vertex badge — matches the divider-bar compartment colour. */
@@ -83,7 +100,7 @@
   }
 
   /* Hit radius for the fused-vertex merge handle (the two overlapping badges). */
-  const MERGE_R = 22;
+  const MERGE_R = 26;
 
   /* The compartment's parts, e.g. "fat + sugar". */
   function groupText(g) {
@@ -96,6 +113,187 @@
     ctx.textAlign = align;
     ctx.textBaseline = "middle";
     ctx.fillText(text, x, y);
+  }
+
+  /* Visibility of point i. `sameFam` = the point shares the selected recipe's
+   * family (always highlighted). Under a selection, a point is active if it is
+   * same-family or inside the disc; the rest of a search/filter context is
+   * whispered. A search and a selection both constrain, so they intersect. */
+  function vis(m, nb, i, sameFam) {
+    if (!m && !nb) return { active: true, context: false };
+    return {
+      active: (!m || !!m[i]) && (!nb || sameFam || !!nb.mask[i]),
+      context: true,
+    };
+  }
+
+  /* The selection disc: a *fixed data-space* radius (see geo AID.NEIGHBOURHOOD_R)
+   * drawn at the current view scale, so zooming never changes who is inside.
+   * Everything the mask flags, plus the selected recipe's family, is
+   * highlighted. The radius shrinks with the on-screen scale of the frame. */
+  function drawDisc(ctx, x0, y0, rPx) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x0, y0, rPx, 0, 6.2832);
+    ctx.fillStyle = "rgba(78, 121, 167, 0.10)";
+    ctx.fill();
+    // white casing, then a dashed dark ring, so the edge reads over the dots
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+    ctx.lineWidth = 5;
+    ctx.stroke();
+    ctx.setLineDash([7, 5]);
+    ctx.strokeStyle = "rgba(30, 30, 30, 0.9)";
+    ctx.lineWidth = 2.2;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /* The 1D analogue of the disc: an interval on the axis, drawn as a band that
+   * spans every family row, so it covers all types at once. */
+  function drawBand(ctx, x0, x1, yTop, yBot) {
+    const left = Math.min(x0, x1), right = Math.max(x0, x1);
+    ctx.save();
+    ctx.fillStyle = "rgba(78, 121, 167, 0.10)";
+    ctx.fillRect(left, yTop, right - left, yBot - yTop);
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+    ctx.lineWidth = 5;
+    ctx.setLineDash([7, 5]);
+    ctx.beginPath();
+    ctx.moveTo(left, yTop); ctx.lineTo(left, yBot);
+    ctx.moveTo(right, yTop); ctx.lineTo(right, yBot);
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(30, 30, 30, 0.9)";
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.moveTo(left, yTop); ctx.lineTo(left, yBot);
+    ctx.moveTo(right, yTop); ctx.lineTo(right, yBot);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /* Data-space neighbourhood: every recipe within `r` of the selection in the
+   * partition's regular-simplex frame. For a unit-edge regular simplex the
+   * squared distance between two points is |Δb|²/2, independent of k — so one
+   * formula serves the axis interval (k=2), the triangle (k=3) and the tetra
+   * (k=4), and the result is invariant to zoom, rotation and panning. */
+  function frameNeighbours(data, n, sel, r, bary, k) {
+    if (sel < 0) return null;
+    const off = sel * k, r2 = 2 * r * r, cls = data.recipes.cls;
+    const mask = new Uint8Array(n), counts = {};
+    let count = 0;
+    for (let i = 0; i < n; i++) {
+      const o = i * k;
+      let d2 = 0;
+      for (let j = 0; j < k; j++) { const e = bary[o + j] - bary[off + j]; d2 += e * e; }
+      if (d2 <= r2) {
+        mask[i] = 1;
+        count++;
+        counts[cls[i]] = (counts[cls[i]] || 0) + 1;
+      }
+    }
+    return { mask, count, counts, r, sel, k };
+  }
+
+  /* ── ratio-equation locus ──────────────────────────────────────────────
+   * A ratio equation ("flour : fat = 2 : 1") is a linear slice of the
+   * simplex. geo.ratioLocusVertices gives its corner points; projecting them
+   * and taking the convex hull draws the set as a translucent region — a
+   * line, a plane or a point, depending on the view. It never filters. */
+  const LOCUS_FILL = "rgba(176, 122, 161, 0.14)";
+  const LOCUS_EDGE = "rgba(150, 92, 138, 0.95)";
+
+  function drawLocus(ctx, eqs, toScreen) {
+    if (!eqs || !eqs.length) return;
+    for (const eq of eqs) {
+      const verts = AID.ratioLocusVertices(eq.ops);
+      if (verts.length < 2) continue;
+      const hull = AID.hull2(verts.map(toScreen));
+      if (hull.length < 2) continue;
+      ctx.save();
+      ctx.beginPath();
+      if (hull.length === 2) {
+        ctx.moveTo(hull[0][0], hull[0][1]);
+        ctx.lineTo(hull[1][0], hull[1][1]);
+      } else {
+        hull.forEach((pt, i) => (i ? ctx.lineTo(pt[0], pt[1]) : ctx.moveTo(pt[0], pt[1])));
+        ctx.closePath();
+        ctx.fillStyle = LOCUS_FILL;
+        ctx.fill();
+      }
+      ctx.setLineDash([6, 4]);
+      ctx.strokeStyle = LOCUS_EDGE;
+      ctx.lineWidth = 1.6;
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  /* 1D locus: the slice projects to an interval on the axis, drawn as a band
+   * spanning every family row. */
+  function drawEqBand(ctx, x0, x1, yTop, yBot) {
+    if (!isFinite(x0) || !isFinite(x1)) return;
+    const left = Math.min(x0, x1), right = Math.max(x0, x1);
+    ctx.save();
+    ctx.fillStyle = LOCUS_FILL;
+    ctx.fillRect(left, yTop, right - left, yBot - yTop);
+    ctx.setLineDash([6, 4]);
+    ctx.strokeStyle = LOCUS_EDGE;
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(left, yTop); ctx.lineTo(left, yBot);
+    ctx.moveTo(right, yTop); ctx.lineTo(right, yBot);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /* Dotted link from the selection to a marker (nearest centroid / archetype). */
+  function dottedLink(ctx, x1, y1, x2, y2) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    // white casing under the dashes so the line stays legible over the dots
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+    ctx.lineWidth = 4;
+    ctx.stroke();
+    ctx.setLineDash([6, 5]);
+    ctx.strokeStyle = "rgba(30, 30, 30, 0.95)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /* Class barycentre in frame space (frame is linear in the group shares, so
+   * the mean of the projected points is the projection of the mean shares). */
+  function classCentroids(data, frame, n) {
+    const sums = {}, cnt = {}, cls = data.recipes.cls;
+    for (let i = 0; i < n; i++) {
+      const c = cls[i];
+      let s = sums[c];
+      if (!s) { s = sums[c] = [0, 0]; cnt[c] = 0; }
+      s[0] += frame[i * 2]; s[1] += frame[i * 2 + 1]; cnt[c]++;
+    }
+    const out = [];
+    for (const c in sums) out.push([c, sums[c][0] / cnt[c], sums[c][1] / cnt[c]]);
+    return out;
+  }
+
+  function diamond(ctx, x, y, r, fill) {
+    ctx.beginPath();
+    ctx.moveTo(x, y - r); ctx.lineTo(x + r, y);
+    ctx.lineTo(x, y + r); ctx.lineTo(x - r, y);
+    ctx.closePath();
+    ctx.fillStyle = fill; ctx.fill();
+    ctx.lineWidth = 3; ctx.strokeStyle = "#fff"; ctx.stroke();
+    ctx.lineWidth = 1.4; ctx.strokeStyle = "#262626"; ctx.stroke();
+  }
+
+  /* Blend two #rrggbb colours (the fused compartments' colours). */
+  function mixHex(a, b, t) {
+    const pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16);
+    const ch = (v, s) => (v >> s) & 255;
+    const m = s => Math.round(ch(pa, s) * (1 - t) + ch(pb, s) * t);
+    return "rgb(" + m(16) + "," + m(8) + "," + m(0) + ")";
   }
 
   /* ── 2D: triangle ───────────────────────────────────────────────────── */
@@ -143,32 +341,89 @@
       }
       ctx.stroke();
 
-      // archetype stars
-      ctx.fillStyle = "#3a3a35";
-      const atmp = [0, 0];
-      for (let a = 0; a < this.archBary.length / 3; a++) {
-        AID.project2(this.archBary.subarray(a * 3, a * 3 + 3), atmp);
-        star(ctx, this.sx(atmp[0]), this.sy(atmp[1]), 7);
-        ctx.font = "600 11px system-ui, sans-serif";
-        ctx.fillText(this.data.archetypes[a].name, this.sx(atmp[0]),
-          this.sy(atmp[1]) - 11);
+      // ratio-equation locus (background guide), projected like the points
+      const eqsV = this.store.get().ratioEqs;
+      if (eqsV && eqsV.length) {
+        const self = this;
+        drawLocus(ctx, eqsV, raw => {
+          const bb = AID.bary([raw], groups);
+          const o = [0, 0];
+          AID.project2(bb, o);
+          return [self.sx(o[0]), self.sy(o[1])];
+        });
       }
 
-      // points: matches pop, the rest whisper (uniform when no search)
+      const sel = this.sel();
+      const sameBase = sel >= 0 ? this.data.recipes.cls[sel] : null;
+      const nb = this.store.get().showNeighbourhood
+        ? frameNeighbours(this.data, n, sel, AID.NEIGHBOURHOOD_R,
+          cache.bary, groups.length)
+        : null;
+      this.nb = nb;
+
+      // points: matches/neighbours pop, the rest whisper (uniform when idle)
       const m = this.store.get().matches;
       const fade = this.cache.fade == null ? 1 : this.cache.fade;
+      const clsArr = this.data.recipes.cls;
       for (let i = 0; i < n; i++) {
-        const on = !m || m[i];
+        if (i === sel) continue; // the selected dot is drawn on top, last
+        const sameFam = sameBase !== null && clsArr[i] === sameBase;
+        const v = vis(m, nb, i, sameFam);
         ctx.fillStyle = this.cache.colors[i];
-        ctx.globalAlpha = (m ? (on ? 0.9 : 0.045) : 0.25) * fade;
+        ctx.globalAlpha = (v.context ? (v.active ? A_ACTIVE : A_DIM) : A_IDLE) * fade;
         ctx.beginPath();
         ctx.arc(this.sx(frame[i * 2]), this.sy(frame[i * 2 + 1]),
-          on ? PT_R + (m ? 0.4 : 0) : PT_R - 0.5, 0, 6.2832);
+          dotRadius(v), 0, 6.2832);
         ctx.fill();
       }
       ctx.globalAlpha = 1;
 
-      const sel = this.sel();
+      if (nb) drawDisc(ctx, this.sx(frame[sel * 2]), this.sy(frame[sel * 2 + 1]),
+        AID.NEIGHBOURHOOD_R * this.s);
+
+      // marker positions (centroids and archetypes), used by the dotted links
+      const cents = classCentroids(this.data, frame, n);
+      const atmp = [0, 0], archPos = {};
+      for (let a = 0; a < this.archBary.length / 3; a++) {
+        AID.project2(this.archBary.subarray(a * 3, a * 3 + 3), atmp);
+        archPos[this.data.archetypes[a].name] = [this.sx(atmp[0]), this.sy(atmp[1])];
+      }
+
+      // dotted lines to the nearest centroid and nearest book archetype
+      if (sel >= 0 && nb) {
+        const rp = this.data.recipes.P[sel];
+        const nc = AID.nearestCentroid(rp, this.data.recipes.P, clsArr);
+        const na = AID.aitchisonNearest(rp, this.data.archetypes);
+        const x1 = this.sx(frame[sel * 2]), y1 = this.sy(frame[sel * 2 + 1]);
+        for (const [c, x, y] of cents) {
+          if (c === nc.name) dottedLink(ctx, x1, y1, this.sx(x), this.sy(y));
+        }
+        if (archPos[na.name]) {
+          dottedLink(ctx, x1, y1, archPos[na.name][0], archPos[na.name][1]);
+        }
+      }
+
+      // markers over everything: class centroids, then book archetypes
+      for (const [c, x, y] of cents) diamond(ctx, this.sx(x), this.sy(y), 5.5, AID.colorOf(c));
+      ctx.fillStyle = "#3a3a35";
+      for (let a = 0; a < this.archBary.length / 3; a++) {
+        const ap = archPos[this.data.archetypes[a].name];
+        star(ctx, ap[0], ap[1], 8);
+        ctx.font = "600 11px system-ui, sans-serif";
+        ctx.fillText(this.data.archetypes[a].name, ap[0], ap[1] - 12);
+      }
+
+      // the selected dot, always drawn last at near-full strength so it is
+      // never hidden by the cloud it sits in
+      if (sel >= 0) {
+        ctx.fillStyle = this.cache.colors[sel];
+        ctx.globalAlpha = A_CHOSEN * fade;
+        ctx.beginPath();
+        ctx.arc(this.sx(frame[sel * 2]), this.sy(frame[sel * 2 + 1]),
+          PT_R + 1.6, 0, 6.2832);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
       if (sel >= 0) {
         ctx.strokeStyle = "#262626";
         ctx.lineWidth = 2;
@@ -292,6 +547,22 @@
         ctx.fillText(t + "%", x, H - 12);
       }
 
+      // ratio-equation locus (background band) spanning every family row
+      const eqsV = this.store.get().ratioEqs;
+      if (eqsV && eqsV.length) {
+        for (const eq of eqsV) {
+          const verts = AID.ratioLocusVertices(eq.ops);
+          if (verts.length < 2) continue;
+          let lo = Infinity, hi = -Infinity;
+          for (const raw of verts) {
+            const v = AID.bary([raw], groups)[0] * 100;
+            if (v < lo) lo = v;
+            if (v > hi) hi = v;
+          }
+          drawEqBand(ctx, sx(Math.max(X0, lo)), sx(Math.min(X1, hi)), TOP, H - 30);
+        }
+      }
+
       if (this.pathKey !== X0 + "|" + X1) {
         this.pathKey = X0 + "|" + X1;
         this.paths = order.map((c, r) => {
@@ -303,15 +574,38 @@
           const h = sd > 0 ? 1.06 * sd * Math.pow(vv.length, -0.2) : 1;
           const G = 128, lo = Math.max(X0, m - 3 * sd), hi = Math.min(X1, m + 3 * sd);
           const path = [];
+          let maxD = 0;
           for (let g = 0; g < G; g++) {
             const x = lo + (hi - lo) * g / (G - 1);
             let d = 0;
             for (const v of vv) { const u = (x - v) / h; d += Math.exp(-0.5 * u * u); }
-            path.push([lo + (hi - lo) * g / (G - 1), d / vv.length]);
+            path.push([x, d]);
+            if (d > maxD) maxD = d;
           }
+          // normalize each silhouette to its own peak: rows no longer overflow
+          // their band and overlap the neighbours.
+          const inv = maxD > 0 ? 1 / maxD : 0;
+          for (const q of path) q[1] *= inv;
           return path;
         });
       }
+
+      // screen position of every point, for the fixed-radius selection disc
+      const xp = new Float32Array(n), yp = new Float32Array(n);
+      order.forEach((c, r) => {
+        const yMid = TOP + r * rowH + rowH / 2;
+        const half = Math.min(rowH * 0.42, 26);
+        for (const i of rowPts[r]) {
+          xp[i] = sx(Math.max(X0, Math.min(X1, values[i])));
+          yp[i] = yMid + jitter(i) * half * 0.5;
+        }
+      });
+      const sel = this.sel();
+      const sameBase = sel >= 0 ? this.data.recipes.cls[sel] : null;
+      const nb = this.store.get().showNeighbourhood
+        ? frameNeighbours(this.data, n, sel, AID.NEIGHBOURHOOD_R, cache.bary, k)
+        : null;
+      this.nb = nb;
 
       order.forEach((c, r) => {
         const yTop = TOP + r * rowH, yMid = yTop + rowH / 2;
@@ -326,9 +620,9 @@
         let mode = path[0][0], modeD = path[0][1];
         for (const q of path) if (q[1] > modeD) { modeD = q[1]; mode = q[0]; }
         ctx.moveTo(sx(path[0][0]), yMid);
-        for (const pt of path) ctx.lineTo(sx(pt[0]), yMid - pt[1] * half * 40);
+        for (const pt of path) ctx.lineTo(sx(pt[0]), yMid - pt[1] * half * 1.5);
         for (let g = path.length - 1; g >= 0; g--)
-          ctx.lineTo(sx(path[g][0]), 2 * yMid - (yMid - path[g][1] * half * 40));
+          ctx.lineTo(sx(path[g][0]), 2 * yMid - (yMid - path[g][1] * half * 1.5));
         ctx.closePath();
         ctx.fill();
         ctx.globalAlpha = 1;
@@ -339,19 +633,26 @@
         ctx.beginPath(); ctx.moveTo(sx(mode), yTop + 4); ctx.lineTo(sx(mode), yTop + rowH - 4); ctx.stroke();
         ctx.setLineDash([]);
 
-        // points: matches pop, the rest whisper
+        // points: matches/neighbours pop, the rest whisper
         const m = this.store.get().matches;
         const fade = this.cache.fade == null ? 1 : this.cache.fade;
+        const clsArr = this.data.recipes.cls;
+        let sum = 0;
         for (const i of pts) {
-          const on = !m || m[i];
+          sum += values[i];
+          if (i === sel) continue; // drawn on top, after every row
+          const sameFam = sameBase !== null && clsArr[i] === sameBase;
+          const v = vis(m, nb, i, sameFam);
           ctx.fillStyle = AID.colorOf(c);
-          ctx.globalAlpha = (m ? (on ? 0.85 : 0.05) : 0.3) * fade;
+          ctx.globalAlpha = (v.context ? (v.active ? A_ACTIVE : A_DIM) : A_IDLE) * fade;
           ctx.beginPath();
-          ctx.arc(sx(Math.max(X0, Math.min(X1, values[i]))),
-            yMid + jitter(i) * half * 0.5, on ? 1.8 : 1.3, 0, 6.2832);
+          ctx.arc(xp[i], yp[i], v.active ? 1.8 : 1.3, 0, 6.2832);
           ctx.fill();
         }
         ctx.globalAlpha = 1;
+
+        // class barycentre on this row
+        if (pts.length) diamond(ctx, sx(sum / pts.length), yMid, 5.5, AID.colorOf(c));
 
         // archetype ticks
         ctx.strokeStyle = "#3a3a35";
@@ -371,7 +672,19 @@
         ctx.fillText(c, plotL - 12, yMid + 4);
       });
 
-      const sel = this.sel();
+      if (nb) {
+        const rv = AID.NEIGHBOURHOOD_R * 100; // share units -> percent
+        drawBand(ctx, sx(values[sel] - rv), sx(values[sel] + rv), TOP - 6, H - 30);
+      }
+
+      // the selected dot, drawn last so it is never hidden by its row
+      if (sel >= 0) {
+        ctx.fillStyle = AID.colorOf(this.data.recipes.cls[sel]);
+        ctx.globalAlpha = (this.cache.fade == null ? 1 : this.cache.fade) * A_CHOSEN;
+        ctx.beginPath(); ctx.arc(xp[sel], yp[sel], 2.8, 0, 6.2832); ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+
       const clampX = v => sx(Math.max(X0, Math.min(X1, v)));
       if (sel >= 0) {
         const r = order.indexOf(this.data.recipes.cls[sel]);
@@ -463,19 +776,16 @@
     const UNIT = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]];
 
     const depth = new Float32Array(n);
-    let order = null, dmin = 0, dmax = 1, lastYaw = NaN, lastPitch = NaN;
+    let order = null, lastYaw = NaN, lastPitch = NaN;
 
     function projectAll() {
       if (cache.frameLocked) return; // a morph owns the frame; don't clobber
       cache.updateFrame([yaw, pitch]);
       if (order && yaw === lastYaw && pitch === lastPitch) return;
       lastYaw = yaw; lastPitch = pitch;
-      dmin = Infinity; dmax = -Infinity;
       for (let i = 0; i < n; i++) {
         AID.project3(cache.bary.subarray(i * 4, i * 4 + 4), yaw, pitch, tmp);
         depth[i] = tmp[2];
-        if (tmp[2] < dmin) dmin = tmp[2];
-        if (tmp[2] > dmax) dmax = tmp[2];
       }
       // Sorting 29k points every orbit frame is wasteful; while the camera is
       // moving, re-sort at most ~8/s and always once movement settles.
@@ -494,8 +804,8 @@
       const s = Math.min((W - 2 * m), (H - 2 * m)) / (2 * AID.TET_RADIUS) * zoom;
       return {
         s,
-        tx: W / 2 - s * AID.TET_CENTROID[0],
-        ty: H / 2 - s * AID.TET_CENTROID[1],
+        tx: W / 2 - s * AID.TET_CENTROID[0] + (cam.panx || 0),
+        ty: H / 2 - s * AID.TET_CENTROID[1] - (cam.pany || 0),
       };
     }
 
@@ -508,10 +818,15 @@
       projectAll();
       T = fit(W, H);
 
-      const proj = UNIT.map(u => {
-        AID.project3(u, yaw, pitch, tmp);
-        return [sx(tmp[0]), sy(tmp[1])];
-      });
+      // During a 3D->2D morph the wireframe is driven frame-by-frame: this.wire
+      // holds four frame-space corners (the two merging ones converge). It is a
+      // pure frame-space move, so the transition needs no camera rotation.
+      const proj = this.wire
+        ? this.wire.map(p => [sx(p[0]), sy(p[1])])
+        : UNIT.map(u => {
+            AID.project3(u, yaw, pitch, tmp);
+            return [sx(tmp[0]), sy(tmp[1])];
+          });
 
       // base triangle (front face) — always present, so 2D -> 3D morphs feel
       // like the rich vertex tearing open rather than a scene swap
@@ -535,33 +850,94 @@
       ctx.stroke();
       ctx.globalAlpha = 1;
 
-      // archetype stars
-      ctx.fillStyle = "#3a3a35";
-      for (let a = 0; a < this.archBary.length / 4; a++) {
-        AID.project3(this.archBary.subarray(a * 4, a * 4 + 4), yaw, pitch, tmp);
-        star(ctx, sx(tmp[0]), sy(tmp[1]), 7);
-        ctx.font = "600 11px system-ui, sans-serif";
-        ctx.fillText(this.data.archetypes[a].name, sx(tmp[0]), sy(tmp[1]) - 11);
+      // ratio-equation locus (background guide), reprojected with the camera
+      const eqsV = this.store.get().ratioEqs;
+      if (eqsV && eqsV.length) {
+        drawLocus(ctx, eqsV, raw => {
+          const bb = AID.bary([raw], groups);
+          AID.project3(bb, yaw, pitch, tmp);
+          return [sx(tmp[0]), sy(tmp[1])];
+        });
       }
 
-      // points in painter's order: far first, near on top and a touch larger
+      const sel = this.sel();
+      const clsArr = this.data.recipes.cls;
+      const sameBase = sel >= 0 ? clsArr[sel] : null;
+      const nb = this.store.get().showNeighbourhood
+        ? frameNeighbours(this.data, n, sel, AID.NEIGHBOURHOOD_R,
+          cache.bary, groups.length)
+        : null;
+      this.nb = nb;
+
+      // points in painter's order (far first, near on top)
       const m = this.store.get().matches;
-      const span = dmax > dmin ? dmax - dmin : 1;
       const fade = this.cache.fade == null ? 1 : this.cache.fade;
       for (let k = 0; k < n; k++) {
         const i = order ? order[k] : k;
-        const on = !m || m[i];
-        const t = (depth[i] - dmin) / span;
+        if (i === sel) continue; // the selected dot is drawn on top, last
+        const sameFam = sameBase !== null && clsArr[i] === sameBase;
+        const v = vis(m, nb, i, sameFam);
         ctx.fillStyle = this.cache.colors[i];
-        ctx.globalAlpha = (m ? (on ? 0.9 : 0.045) : (0.16 + 0.22 * t)) * fade;
+        // same opacity and size as the 2D view: overlaps blend, depth is not
+        // encoded in the dot (only the draw order and the camera give depth)
+        ctx.globalAlpha = (v.context ? (v.active ? A_ACTIVE : A_DIM) : A_IDLE) * fade;
         ctx.beginPath();
         ctx.arc(sx(screen[i * 2]), sy(screen[i * 2 + 1]),
-          (on ? PT_R + 0.4 : PT_R - 0.5) * (0.8 + 0.6 * t), 0, 6.2832);
+          dotRadius(v), 0, 6.2832);
         ctx.fill();
       }
       ctx.globalAlpha = 1;
 
-      const sel = this.sel();
+      if (nb) drawDisc(ctx, sx(screen[sel * 2]), sy(screen[sel * 2 + 1]),
+        AID.NEIGHBOURHOOD_R * T.s);
+
+      // marker positions (centroids and archetypes), used by the dotted links
+      const cents = classCentroids(this.data, screen, n);
+      const archPos = {};
+      for (let a = 0; a < this.archBary.length / 4; a++) {
+        if (this.arch) {
+          archPos[this.data.archetypes[a].name] =
+            [sx(this.arch[a][0]), sy(this.arch[a][1])];
+        } else {
+          AID.project3(this.archBary.subarray(a * 4, a * 4 + 4), yaw, pitch, tmp);
+          archPos[this.data.archetypes[a].name] = [sx(tmp[0]), sy(tmp[1])];
+        }
+      }
+
+      // dotted lines to the nearest centroid and nearest book archetype
+      if (sel >= 0 && nb) {
+        const rp = this.data.recipes.P[sel];
+        const nc = AID.nearestCentroid(rp, this.data.recipes.P, clsArr);
+        const na = AID.aitchisonNearest(rp, this.data.archetypes);
+        const x1 = sx(screen[sel * 2]), y1 = sy(screen[sel * 2 + 1]);
+        for (const [c, x, y] of cents) {
+          if (c === nc.name) dottedLink(ctx, x1, y1, sx(x), sy(y));
+        }
+        if (archPos[na.name]) {
+          dottedLink(ctx, x1, y1, archPos[na.name][0], archPos[na.name][1]);
+        }
+      }
+
+      // markers over everything: class centroids, then book archetypes
+      for (const [c, x, y] of cents) diamond(ctx, sx(x), sy(y), 5.5, AID.colorOf(c));
+      ctx.fillStyle = "#3a3a35";
+      for (let a = 0; a < this.archBary.length / 4; a++) {
+        const ap = archPos[this.data.archetypes[a].name];
+        star(ctx, ap[0], ap[1], 8);
+        ctx.font = "600 11px system-ui, sans-serif";
+        ctx.fillText(this.data.archetypes[a].name, ap[0], ap[1] - 12);
+      }
+
+      // the selected dot, drawn last so it is never hidden by the cloud
+      if (sel >= 0) {
+        ctx.fillStyle = this.cache.colors[sel];
+        ctx.globalAlpha = A_CHOSEN * fade;
+        ctx.beginPath();
+        ctx.arc(sx(screen[sel * 2]), sy(screen[sel * 2 + 1]),
+          PT_R + 1.6, 0, 6.2832);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
       if (sel >= 0) {
         ctx.strokeStyle = "#262626"; ctx.lineWidth = 2;
         ctx.beginPath();
@@ -575,31 +951,69 @@
         ctx.stroke();
       }
 
-      // two corners that line up on screen can be merged: draw their badges
-      // fused — the born 4th vertex hidden behind its parent — and make the
-      // overlapping pair the clickable merge handle.
+      // two corners that line up on screen can be merged. As they come
+      // together they visibly fuse — two lobes pulled toward their midpoint,
+      // swelling, then a single lozenge with an ∞ — and once fused the glyph is
+      // the click target that collapses the pair into one 2D vertex.
       this.mergePair = null;
       if (!cache.frameLocked) {
-        let best = 1e9;
+        let best = 1e9, bi = 0, bj = 1;
         for (let i = 0; i < 4; i++) for (let j = i + 1; j < 4; j++) {
           const dx = proj[i][0] - proj[j][0], dy = proj[i][1] - proj[j][1];
           const d = Math.hypot(dx, dy);
-          if (d < best) {
-            best = d;
-            this.mergePair = {
-              i, j, x: (proj[i][0] + proj[j][0]) / 2, y: (proj[i][1] + proj[j][1]) / 2,
-            };
-          }
+          if (d < best) { best = d; bi = i; bj = j; }
         }
-        if (best > 26) this.mergePair = null;
+        const FUSE = 40;
+        if (best <= FUSE) {
+          this.mergePair = {
+            i: bi, j: bj,
+            x: (proj[bi][0] + proj[bj][0]) / 2,
+            y: (proj[bi][1] + proj[bj][1]) / 2,
+            t: Math.max(0, 1 - best / FUSE),
+          };
+        }
         const mp = this.mergePair;
         if (mp) {
-          let ux = proj[mp.i][0] - proj[mp.j][0], uy = proj[mp.i][1] - proj[mp.j][1];
-          const L = Math.hypot(ux, uy);
-          if (L > 1) { ux /= L; uy /= L; } else { ux = 1; uy = 0; }
-          const o = 5;
-          vertexBadge(ctx, proj[mp.j][0] - ux * o, proj[mp.j][1] - uy * o, mp.j);
-          vertexBadge(ctx, proj[mp.i][0] + ux * o, proj[mp.i][1] + uy * o, mp.i);
+          const t = mp.t;
+          const pulse = (1 + 0.04 * Math.sin(performance.now() / 220)) * (1 + 0.12 * t);
+          const pull = 0.45 * t;
+          const ax = proj[mp.i][0] + (mp.x - proj[mp.i][0]) * pull;
+          const ay = proj[mp.i][1] + (mp.y - proj[mp.i][1]) * pull;
+          const bx = proj[mp.j][0] + (mp.x - proj[mp.j][0]) * pull;
+          const by = proj[mp.j][1] + (mp.y - proj[mp.j][1]) * pull;
+          const r = (11 + 4 * t) * pulse;
+          const d = Math.hypot(bx - ax, by - ay);
+          const colI = AID.vertexColor(mp.i), colJ = AID.vertexColor(mp.j);
+          const th = Math.atan2(by - ay, bx - ax);
+
+          if (d >= 2 * r) {
+            // still two distinct blobs, each in its own colour
+            for (const [x, y, col] of [[ax, ay, colI], [bx, by, colJ]]) {
+              ctx.beginPath(); ctx.arc(x, y, r, 0, 6.2832);
+              ctx.fillStyle = col; ctx.fill();
+              ctx.lineWidth = 2.5; ctx.strokeStyle = "#262626"; ctx.stroke();
+            }
+          } else {
+            // union of the two discs: a single outline with no seam, so they
+            // read as one fused object (the colour blends as they merge)
+            const al = Math.acos(Math.min(1, d / (2 * r)));
+            ctx.beginPath();
+            ctx.arc(ax, ay, r, th - al, th + al, true);
+            ctx.arc(bx, by, r, Math.PI - al + th, Math.PI + al + th, true);
+            ctx.closePath();
+            ctx.fillStyle = mixHex(colI, colJ, 0.5);
+            ctx.fill();
+            ctx.lineWidth = 2.5; ctx.strokeStyle = "#262626"; ctx.stroke();
+          }
+
+          // compartment numbers, pinned to the outer ends of the fused shape
+          ctx.fillStyle = "#fff";
+          ctx.font = "700 12px system-ui, sans-serif";
+          ctx.textAlign = "center"; ctx.textBaseline = "middle";
+          const ex = ax - Math.cos(th) * r * 0.5, ey = ay - Math.sin(th) * r * 0.5;
+          const fx = bx + Math.cos(th) * r * 0.5, fy = by + Math.sin(th) * r * 0.5;
+          ctx.fillText(String(mp.i + 1), ex, ey + 0.5);
+          ctx.fillText(String(mp.j + 1), fx, fy + 0.5);
         }
       }
 
@@ -646,8 +1060,29 @@
     p.wheel = function (mx, my, dy) { this.zoom(mx, my, dy < 0 ? 1.15 : 1 / 1.15); };
     /* Used by the 2D->3D morph to rotate the frame while the points blend. */
     p.setCamera = function (y, pi) { yaw = y; pitch = pi; };
-    p.drag = function (mx, my, dx, dy) {
-      yaw += dx * 0.01;
+    p.setZoom = function (z) { zoom = z; cam.zoom = z; };
+    /* Frame-space corners / archetype points the 3D->2D morph interpolates. */
+    p.wireCorners = function () {
+      return UNIT.map(u => {
+        AID.project3(u, yaw, pitch, tmp);
+        return [tmp[0], tmp[1]];
+      });
+    };
+    p.archPoints = function () {
+      const out = [];
+      for (let a = 0; a < this.archBary.length / 4; a++) {
+        AID.project3(this.archBary.subarray(a * 4, a * 4 + 4), yaw, pitch, tmp);
+        out.push([tmp[0], tmp[1]]);
+      }
+      return out;
+    };
+    p.drag = function (mx, my, dx, dy, ctrl) {
+      if (ctrl) {
+        // ctrl+drag pans the scene (screen pixels); plain drag orbits
+        cam.panx = (cam.panx || 0) + dx;
+        cam.pany = (cam.pany || 0) + dy;
+        return;
+      }      yaw += dx * 0.01;
       pitch = Math.max(-1.3, Math.min(1.3, pitch + dy * 0.01));
       cam.yaw = yaw; cam.pitch = pitch;
       p._lastMove = performance.now();
@@ -655,6 +1090,7 @@
     p.dblclick = function () {
       yaw = 0; pitch = 0; zoom = 1;
       cam.yaw = yaw; cam.pitch = pitch; cam.zoom = zoom;
+      cam.panx = 0; cam.pany = 0;
     };
     p.value = idx => AID.readout(p.data.recipes.P[idx]);
     return p;

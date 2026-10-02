@@ -46,6 +46,19 @@
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, W, H);
       if (painter) painter.draw(ctx, W, H);
+      notifyNeighbours();
+    }
+
+    /* The painter computes the (screen-space) neighbourhood while drawing;
+     * forward it to the ratio card. Keyed so it only fires when the selection
+     * or the count changes (the card throttles the orbit churn). */
+    let lastNbKey = null;
+    function notifyNeighbours() {
+      const nb = painter && painter.nb;
+      const key = nb ? nb.sel + ":" + nb.count : "null";
+      if (key === lastNbKey) return;
+      lastNbKey = key;
+      if (AID.onNeighbourhood) AID.onNeighbourhood(nb);
     }
 
     function rebuild() {
@@ -108,8 +121,9 @@
      *   2D -> 3D  rotate the regular tetra about the edge of the two untouched
      *             corners (geo.setBirthAt) so they stay put, the split corner
      *             extends and the apex hides behind it; points reproject live.
-     *   3D -> 2D  reverse that rotation and settle face-on, then switch to the
-     *             flat 2D painter.
+     *   3D -> 2D  fold flat where it stands: the merged corners converge and
+     *             every point moves straight to the canonical 2D frame — no
+     *             camera rotation, only an in-plane/scale adjustment.
      * other changes just tween point positions at the current camera. */
     let anim = null;
     const DUR = 550;
@@ -119,6 +133,7 @@
       if (anim) { cancelAnimationFrame(anim); anim = null; }
       const key = AID.groupsKey(groups);
       const old = cache;
+      const oldPainter = painter;
       const nextDim = AID.dimOf(groups);
       const cam = AID.camera3 || (AID.camera3 = { yaw: 0, pitch: 0, zoom: 1 });
 
@@ -127,10 +142,8 @@
       if (old && old.dim === 2 && nextDim === 3) {
         birthSlot = AID.birthParent(old.groups, groups);
         cam.yaw = 0; cam.pitch = 0; cam.zoom = 1; // face-on base === the 2D frame
+        cam.panx = 0; cam.pany = 0;
       }
-      const mergeSlot = old && old.dim === 3 && nextDim === 2
-        ? AID.birthParent(groups, old.groups) : null;
-
       // build caches in the regular orientation; the birth branch rotates after
       AID.setBirthAt(null, 0);
       AID.birthE = 1;
@@ -139,9 +152,10 @@
         ? Float32Array.from(old.frame) : null;
       cache = next;
       cache.fade = 1; // fade branch below lowers it; others stay fully opaque
-      painter = AID["view" + next.dim](cache, data, store);
-      painter.hover = hover;
-      painter.reset(W, H);
+      const nextPainter = AID["view" + next.dim](cache, data, store);
+      nextPainter.hover = hover;
+      nextPainter.reset(W, H);
+      painter = nextPainter;
 
       // 2D -> 3D by splitting: rotate the regular tetra about the edge joining
       // the two untouched corners while reprojecting every frame. Those corners
@@ -188,46 +202,56 @@
         return;
       }
 
-      // 3D -> 2D: rotate back about that edge (the split corner returns to the
-      // equilateral position, the apex folds away) and settle the camera
-      // face-on, so the final 3D frame equals the 2D frame. Works for merging
-      // any two corners; when it was a born split, the rotation is reversed.
-      if (from && old.dim === 3 && next.dim === 2) {
-        const pcache = buildCache("nul|" + key, groups.concat([[]]));
-        const p3 = AID.view3(pcache, data, store);
-        p3.hover = hover;
-        p3.reset(W, H);
-        const y0 = cam.yaw, p0 = cam.pitch;
-        const ob = old.bary, tgt = pcache.bary, n = data.meta.n, tmp = [0, 0, 0];
-        if (mergeSlot !== null) { AID.setBirthAt(mergeSlot, 1); AID.birthE = 1; }
-        else { AID.setBirthAt(null, 0); AID.birthE = 1; }
-        p3.setCamera(y0, p0);
-        painter = p3;
-        pcache.frameLocked = true;
-        pcache.frame.set(from); // first paint is exactly the old 3D frame
+      // 3D -> 2D: fold the tetra flat right where it stands — no camera
+      // rotation. Merging two groups means two tetra corners become one, so the
+      // scene is already an (in-plane-rotated) triangle; every point just moves
+      // straight to its place in the canonical 2D triangle, the merged pair of
+      // corners converge, and zoom/pan ease back to the default fit. All motion
+      // is in frame space, so this is the shortest possible transition.
+      const pair = old && old.dim === 3 && next.dim === 2
+        ? AID.mergedPair(old.groups, groups) : null;
+      if (from && pair && oldPainter && oldPainter.wireCorners) {
+        AID.setBirthAt(null, 0); AID.birthE = 1;
+        old.frameLocked = true;                 // the morph drives old.frame
+        const oldFrame = Float32Array.from(old.frame);
+        const toFrame = next.frame;             // the new 2D frame
+        const a = pair[0], b = pair[1];         // kept corner, collapsed corner
+        const slotOf = k => (k === b ? a : (k > b ? k - 1 : k));
+        const wire0 = oldPainter.wireCorners();
+        const wire1 = [0, 1, 2, 3].map(k => AID.TRI2[slotOf(k)]);
+        const arch0 = oldPainter.archPoints();
+        const archB = AID.bary(data.archetypes.map(x => x.P), groups);
+        const arch1 = arch0.map((_, idx) => {
+          const q = [0, 0];
+          AID.project2(archB.subarray(idx * 3, idx * 3 + 3), q);
+          return [q[0], q[1]];
+        });
+        const wire = wire0.map(p => p.slice());
+        const arch = arch0.map(p => p.slice());
+        const z0 = cam.zoom, px0 = cam.panx || 0, py0 = cam.pany || 0;
+        painter = oldPainter;                   // keep drawing the 3D painter
+        oldPainter.wire = wire;
+        oldPainter.arch = arch;
         const t0 = performance.now();
         const step = now => {
-          const t = Math.min(1, (now - t0) / DUR), e = ease(t), keep = 1 - e;
-          if (mergeSlot !== null) { AID.setBirthAt(mergeSlot, keep); AID.birthE = keep; }
-          p3.setCamera(y0 * keep, p0 * keep);
-          for (let i = 0; i < n; i++) {
-            const b = [
-              ob[i * 4] * keep + tgt[i * 4] * e,
-              ob[i * 4 + 1] * keep + tgt[i * 4 + 1] * e,
-              ob[i * 4 + 2] * keep + tgt[i * 4 + 2] * e,
-              ob[i * 4 + 3] * keep + tgt[i * 4 + 3] * e,
-            ];
-            AID.project3(b, y0 * keep, p0 * keep, tmp);
-            pcache.frame[i * 2] = tmp[0];
-            pcache.frame[i * 2 + 1] = tmp[1];
+          const t = Math.min(1, (now - t0) / DUR), e = ease(t);
+          for (let i = 0; i < oldFrame.length; i++)
+            old.frame[i] = oldFrame[i] + (toFrame[i] - oldFrame[i]) * e;
+          for (let k = 0; k < 4; k++) {
+            wire[k][0] = wire0[k][0] + (wire1[k][0] - wire0[k][0]) * e;
+            wire[k][1] = wire0[k][1] + (wire1[k][1] - wire0[k][1]) * e;
           }
+          for (let k = 0; k < arch.length; k++) {
+            arch[k][0] = arch0[k][0] + (arch1[k][0] - arch0[k][0]) * e;
+            arch[k][1] = arch0[k][1] + (arch1[k][1] - arch0[k][1]) * e;
+          }
+          oldPainter.setZoom(z0 + (1 - z0) * e);
+          cam.panx = px0 * (1 - e); cam.pany = py0 * (1 - e);
           if (t < 1) anim = requestAnimationFrame(step);
           else {
-            cam.yaw = 0; cam.pitch = 0; cam.zoom = 1;
-            AID.setBirthAt(null, 0);
-            AID.birthE = 1;
-            cache = next;
-            painter = AID.view2(cache, data, store);
+            oldPainter.wire = null; oldPainter.arch = null;
+            old.frameLocked = false;
+            painter = nextPainter;
             painter.hover = hover;
             painter.reset(W, H);
             anim = null;
@@ -347,7 +371,7 @@
 
       const [mx, my] = pos(e);
       if (dragging && painter && painter.drag) {
-        painter.drag(mx, my, mx - last[0], my - last[1]);
+        painter.drag(mx, my, mx - last[0], my - last[1], e.ctrlKey);
         last = [mx, my];
         moved = true;
         hideTooltip();
@@ -356,6 +380,8 @@
       }
       if (e.pointerType === "mouse") {
         const idx = painter ? painter.hit(mx, my) : -1;
+        const overMerge = painter && painter.mergeHit && painter.mergeHit(mx, my);
+        canvas.style.cursor = overMerge ? "pointer" : "";
         if (idx !== hover) {
           hover = idx;
           painter.hover = idx;

@@ -12,22 +12,38 @@
   <div id="searchbar">
     <div id="searchrow">
       <span id="chips"></span>
-      <input id="search" type="text"
-        placeholder="search: ingredient, class, keyword, ratio …" disabled>
+      <input id="search" type="text" aria-label="search recipes"
+        placeholder="search: ingredient, class, keyword, ratio, e.g. flour : fat = 2 : 1" disabled>
+      <button id="searchclear" type="button" aria-label="clear search and filters"
+        title="clear search and filters">×</button>
     </div>
     <span id="count"></span>
-    <div id="dropdown"></div>
+    <div id="dropdown" role="listbox"></div>
   </div>
   <button id="reset" title="reset to flour : wet : rich">reset</button>
 </header>
-<nav id="legend"></nav>
-<nav id="ratio"></nav>
 <main>
-  <section id="plot">
-    <canvas id="canvas"></canvas>
-    <div id="tooltip"></div>
+  <section id="stage">
+    <nav id="ratio" aria-label="ratio compartments"></nav>
+    <section id="plot">
+      <canvas id="canvas"></canvas>
+      <div id="tooltip"></div>
+    </section>
   </section>
-  <aside id="panel"><p id="status">loading…</p></aside>
+  <aside id="panel">
+    <section class="psec" id="recipe"><p id="status">loading…</p></section>
+    <section class="psec">
+      <div class="phead">families</div>
+      <nav id="legend" aria-label="family filters"></nav>
+    </section>
+    <section class="psec">
+      <div class="phead">display</div>
+      <button id="nbtoggle" type="button" aria-pressed="true"
+        title="highlight the selected recipe's neighbourhood (dish and links)">
+        <span class="sw" aria-hidden="true"></span>neighbourhood
+      </button>
+    </section>
+  </aside>
 </main>
 <!-- The data script: referenced by relative path for the dev loop (works over
      file://); the packer replaces this line with the inlined data. -->

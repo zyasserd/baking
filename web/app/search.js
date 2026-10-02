@@ -5,8 +5,10 @@
  * merged group with a min/max % range, blue).
  *
  * Semantics: OR within the ingredient group (find recipes with any of the
- * listed ingredients), AND across everything else. Executed as byte masks —
- * the painters read state.matches to highlight matches vs context.
+ * listed ingredients), AND across everything else. The user may also type
+ * explicit "and"/"or" connectors, which are evaluated left-to-right and
+ * override the defaults for the pair they sit between. Executed as byte
+ * masks — the painters read state.matches to highlight matches vs context.
  */
 (function () {
   "use strict";
@@ -42,6 +44,17 @@
     if (!q) return [];
     const out = [];
 
+    // a complete ratio equation ("flour : fat = 2 : 1") is its own token
+    if (text.indexOf(":") >= 0 && text.indexOf("=") >= 0) {
+      const eq = AID.parseRatioEq(text);
+      if (eq) return [eq];
+    }
+
+    // explicit boolean connectors
+    if (q === "and" || q === "or") {
+      return [{ type: "op", label: q.toUpperCase(), op: q }];
+    }
+
     const scored = [];
     for (let h = 0; h < data.heads.length; h++) {
       const head = AID.normQuery(data.heads[h]);
@@ -57,11 +70,16 @@
       out.push({ type: "ingredient", label: head, head, count });
     }
 
+    // A family/class typed exactly (or as a prefix) resolves to a legend
+    // filter, so surface it ahead of ingredient matches for Enter to hit.
+    const clsMatches = [];
     for (const c of data.meta.classes) {
-      if (AID.normQuery(c).startsWith(q)) {
-        out.push({ type: "class", label: c, count: classCount(c, data) });
-      }
+      const nc = AID.normQuery(c);
+      if (nc.startsWith(q)) clsMatches.push({ type: "class", label: c, count: classCount(c, data), exact: nc === q });
     }
+    const exactClass = clsMatches.filter(s => s.exact);
+    if (exactClass.length) out.unshift(...exactClass);
+    else out.push(...clsMatches);
 
     for (const t of RATIO_TARGETS) {
       if (AID.normQuery(t.label).startsWith(q)) {
@@ -81,41 +99,25 @@
     return n;
   }
 
-  /* Execute tokens -> { mask: Uint8Array|null, ids: Int32Array, count }. */
-  AID.runSearch = function (tokens, data) {
-    const n = data.meta.n;
-    if (tokens.length === 0) return { mask: null, ids: null, count: n };
-
-    let mask = null;
-    const and = m2 => {
-      if (!mask) { mask = m2; return; }
-      for (let i = 0; i < n; i++) mask[i] = mask[i] && m2[i] ? 1 : 0;
-    };
-
-    const ings = tokens.filter(t => t.type === "ingredient");
-    if (ings.length) { // OR within the ingredient group
-      const m = new Uint8Array(n);
-      for (const t of ings) for (const i of data.index[t.head]) m[i] = 1;
-      and(m);
-    }
-
-    for (const t of tokens.filter(t => t.type === "class")) {
-      const m = new Uint8Array(n);
+  /* Execute tokens -> { mask: Uint8Array|null, ids: Int32Array, count }.
+   *
+   * Tokens may include explicit "and"/"or" connectors ({ type: "op" }).
+   * Evaluation is strictly left-to-right; an "op" token overrides the
+   * default connector for the pair it sits between. Without an explicit
+   * connector, two adjacent ingredients default to OR and everything else
+   * defaults to AND. */
+  function operandMask(t, data, n) {
+    const m = new Uint8Array(n);
+    if (t.type === "ingredient") {
+      for (const i of data.index[t.head]) m[i] = 1;
+    } else if (t.type === "class") {
       const cls = data.recipes.cls;
       for (let i = 0; i < n; i++) if (cls[i] === t.label) m[i] = 1;
-      and(m);
-    }
-
-    for (const t of tokens.filter(t => t.type === "keyword")) {
-      const m = new Uint8Array(n);
+    } else if (t.type === "keyword") {
       const q = t.label.toLowerCase();
       const names = data.recipes.name;
       for (let i = 0; i < n; i++) if (names[i].toLowerCase().includes(q)) m[i] = 1;
-      and(m);
-    }
-
-    for (const t of tokens.filter(t => t.type === "ratio")) {
-      const m = new Uint8Array(n);
+    } else if (t.type === "ratio") {
       const P = data.recipes.P;
       const idx = t.target.idx;
       for (let i = 0; i < n; i++) {
@@ -124,7 +126,31 @@
         const pct = v * 100;
         if (pct >= t.min && pct <= t.max) m[i] = 1;
       }
-      and(m);
+    }
+    return m;
+  }
+
+  AID.runSearch = function (tokens, data) {
+    const n = data.meta.n;
+    const operands = tokens.filter(t => t.type !== "op" && t.type !== "ratioeq");
+    if (operands.length === 0) return { mask: null, ids: null, count: n };
+
+    let mask = null;
+    let prev = null;
+    let pending = null;
+    for (const t of tokens) {
+      if (t.type === "op") { if (mask) pending = t.op; continue; }
+      if (t.type === "ratioeq") continue; // overlay only: never filters
+      const m = operandMask(t, data, n);
+      if (!mask) { mask = m; prev = t; pending = null; continue; }
+      const conn = pending || (prev.type === "ingredient" && t.type === "ingredient" ? "or" : "and");
+      if (conn === "and") {
+        for (let i = 0; i < n; i++) mask[i] = mask[i] && m[i] ? 1 : 0;
+      } else {
+        for (let i = 0; i < n; i++) if (m[i]) mask[i] = 1;
+      }
+      prev = t;
+      pending = null;
     }
 
     const ids = [];
@@ -133,4 +159,41 @@
   };
 
   AID.RATIO_TARGETS = RATIO_TARGETS;
+
+  /* Operands accepted by a ratio equation: the five parts plus the two
+   * canonical merges, looked up by normalized name. */
+  const EQ_OPERANDS = [
+    { label: "flour", idx: [0] },
+    { label: "fat", idx: [3] },
+    { label: "sugar", idx: [4] },
+    { label: "liquid", idx: [1] },
+    { label: "egg", idx: [2] },
+    { label: "rich", idx: [3, 4] },
+    { label: "wet", idx: [1, 2] },
+  ];
+  const EQ_BY_NAME = {};
+  for (const o of EQ_OPERANDS) EQ_BY_NAME[AID.normQuery(o.label)] = o;
+
+  /* Parse "flour : fat = 2 : 1" (two or more terms each side) into a ratioeq
+   * token, or null when the text is not a complete, valid equation. */
+  AID.parseRatioEq = function (text) {
+    if (text.indexOf(":") < 0 || text.indexOf("=") < 0) return null;
+    const sides = text.split("=");
+    if (sides.length !== 2) return null;
+    const left = sides[0].split(":").map(s => s.trim()).filter(Boolean);
+    const right = sides[1].split(":").map(s => s.trim()).filter(Boolean);
+    if (left.length < 2 || left.length !== right.length) return null;
+    const ops = [];
+    for (let i = 0; i < left.length; i++) {
+      const op = EQ_BY_NAME[AID.normQuery(left[i])];
+      const k = Number(right[i]);
+      if (!op || !isFinite(k) || k <= 0) return null;
+      ops.push({ idx: op.idx.slice(), label: op.label, k });
+    }
+    return {
+      type: "ratioeq",
+      label: ops.map(o => o.label).join(" : ") + " = " + ops.map(o => o.k).join(" : "),
+      ops,
+    };
+  };
 })();

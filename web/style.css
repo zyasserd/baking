@@ -37,35 +37,86 @@ h1 { font-size: 15px; font-weight: 650; letter-spacing: 0.01em; }
 #searchrow {
   display: flex;
   align-items: center;
-  gap: 6px;
+  column-gap: 6px;
+  row-gap: 5px;
   flex-wrap: wrap;
-}
-
-#search {
-  flex: 1;
-  min-width: 160px;
-  padding: 7px 12px;
+  padding: 4px 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
+}
+
+#searchrow:focus-within { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+#chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+#chips:empty { display: none; }
+
+#search {
+  flex: 1;
+  min-width: 140px;
+  padding: 3px 4px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
   font: inherit;
 }
 
-#search:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+#search:focus { outline: none; }
 
 #count {
-  position: absolute;
-  right: 0;
-  top: 100%;
-  margin-top: 4px;
-  font-size: 12px;
+  display: block;
+  min-height: 14px;
+  margin-top: 3px;
+  padding-left: 6px;
+  font-size: 11.5px;
   color: var(--muted);
 }
+
+#searchclear {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+#searchclear:hover { background: #f0f0ea; color: var(--fg); }
+
+.conn {
+  border: none;
+  background: none;
+  padding: 2px 1px;
+  font: 700 10px/1 inherit;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  cursor: pointer;
+  border-bottom: 1px dotted currentColor;
+}
+
+.conn:hover { color: var(--accent); }
+
+.suggestion b { font-weight: 700; color: var(--fg); }
 
 #dropdown {
   display: none;
   position: absolute;
-  top: calc(100% + 22px);
+  top: calc(100% + 2px);
   left: 0;
   right: 0;
   z-index: 20;
@@ -97,12 +148,12 @@ h1 { font-size: 15px; font-weight: 650; letter-spacing: 0.01em; }
 .chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
+  gap: 5px;
+  padding: 2px 6px;
   border: 1.5px solid var(--line);
-  border-radius: 7px;
+  border-radius: 6px;
   background: #fff;
-  font-size: 13px;
+  font-size: 12.5px;
   white-space: nowrap;
 }
 
@@ -110,6 +161,18 @@ h1 { font-size: 15px; font-weight: 650; letter-spacing: 0.01em; }
 .chip.class { border-color: var(--accent); background: #eef3f8; }
 .chip.keyword { border-color: #f28e2b; background: #fdf3e7; }
 .chip.ratio { border-color: #4e79a7; background: #eef3f8; }
+.chip.eq { border-color: #b07aa1; background: #f7eef4; }
+
+.chip.op {
+  border: none;
+  background: none;
+  padding: 2px 1px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
 
 .chip input[type="number"] {
   width: 52px;
@@ -137,16 +200,46 @@ main {
   min-height: 0;
 }
 
+/* Left workspace: the ratio bar sits directly above the plot it controls. */
+#stage { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
 #plot { flex: 1; position: relative; min-width: 0; }
 
 #canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
 
+/* Right panel: selection details, then the always-on controls. The detail
+ * area takes the remaining height and scrolls on its own, so swapping the
+ * intro for a tall recipe card never pushes the controls below it. */
 #panel {
-  width: 320px;
+  width: 360px;
+  flex-shrink: 0;
   border-left: 1px solid var(--line);
-  padding: 16px;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #fdfdfb;
   font-size: 13px;
+}
+
+.psec { padding: 14px 16px; border-bottom: 1px solid var(--line); }
+.psec:last-child { border-bottom: none; }
+
+/* fixed-height controls; the recipe section absorbs the slack */
+#panel > .psec:not(#recipe) { flex: 0 0 auto; }
+
+#recipe {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.phead {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 10px;
 }
 
 #status { color: var(--muted); }
@@ -164,6 +257,54 @@ main {
 
 #reset:hover { color: var(--fg); }
 
+#nbtoggle {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--muted);
+  cursor: pointer;
+  text-align: left;
+}
+
+#nbtoggle .sw {
+  position: relative;
+  flex-shrink: 0;
+  width: 30px;
+  height: 18px;
+  border-radius: 999px;
+  background: #d8d8d0;
+  transition: background 0.15s;
+}
+
+#nbtoggle .sw::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  transition: transform 0.15s;
+}
+
+#nbtoggle[aria-pressed="true"] {
+  color: var(--fg);
+  border-color: #cfd8e3;
+  background: #eef3f8;
+}
+
+#nbtoggle[aria-pressed="true"] .sw { background: var(--accent); }
+#nbtoggle[aria-pressed="true"] .sw::after { transform: translateX(12px); }
+
 #tooltip {
   display: none;
   position: absolute;
@@ -180,41 +321,57 @@ main {
 
 #tooltip code { font-size: 12px; color: var(--muted); }
 
-/* class legend (family filter) */
+/* families list (vertical, in the panel) */
 #legend {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--line);
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 3px;
 }
 
-.legendlabel { color: var(--muted); font-size: 12px; margin-right: 2px; }
-
-.cchip {
-  display: inline-flex;
+.fam {
+  display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 9px;
-  border: 1.5px solid var(--line);
-  border-radius: 999px;
-  background: #fff;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: none;
   font: inherit;
-  font-size: 12px;
+  font-size: 12.5px;
+  color: var(--fg);
   cursor: pointer;
-  user-select: none;
+  text-align: left;
 }
 
-.cchip i {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  display: inline-block;
+.fam:hover { background: #f2f2ee; }
+.fam.active { background: #f2f2ee; border-color: var(--line); font-weight: 650; }
+
+.fam i {
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
 }
 
-.cchip.active { background: #f2f2ee; font-weight: 650; }
-.cchip.clear { color: var(--muted); border-style: dashed; }
+.famname { flex: 1; }
+
+.famcount {
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.fam.clear {
+  justify-content: center;
+  margin-top: 4px;
+  border: 1px dashed var(--line);
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+/* keeps its box in the layout when inactive, so nothing shifts */
+.fam.clear.hidden { visibility: hidden; }
 
 /* divider bar (ratio compartments) */
 #ratio {
@@ -330,6 +487,7 @@ main {
   font: 600 22px/1.2 ui-monospace, "SF Mono", Menlo, monospace;
   letter-spacing: 0.02em;
   margin-bottom: 2px;
+  white-space: nowrap;
 }
 
 .readoutlabel { color: var(--muted); font-size: 11px; margin-bottom: 10px; }
@@ -371,24 +529,30 @@ main {
 }
 .pcval { width: 38px; text-align: right; font-size: 11px; color: var(--muted); }
 
+.pcblock { border-top: 1px solid var(--line); padding-top: 10px; }
+
+.pierow { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.pie { flex-shrink: 0; }
+.pielegend { display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; }
+.pielegend span { display: inline-flex; align-items: center; gap: 5px; }
+.pielegend i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; flex-shrink: 0; }
+
 @media (max-width: 900px) {
   main { flex-direction: column; }
 
-  #plot { order: 1; min-height: 54vh; }
+  #stage { order: 1; }
+  #plot { min-height: 54vh; }
 
   #panel {
     order: 2;
     width: 100%;
-    height: 40vh;
+    max-height: 46vh;
     border-left: none;
     border-top: 1px solid var(--line);
   }
 
   header { flex-wrap: wrap; gap: 8px; }
-  #searchbar { order: 3; flex-basis: 100%; }
-
-  #legend { overflow-x: auto; flex-wrap: nowrap; }
-  .legendlabel { flex-shrink: 0 }
+  #searchbar { order: 3; flex-basis: 100%; max-width: none; }
 
   .readout { font-size: 18px; }
   .pclabel { width: 92px; }

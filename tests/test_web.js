@@ -102,6 +102,17 @@ ok(AID.colorOf("unknown_class") === "#777777", "palette fallback");
   ok(AID.readout(pound) === "100 : 50 : 50 : 100 : 100", "readout pound cake (display order)");
 }
 
+/* ── geo: nearest class centroid (Aitchison) ─────────────────────────── */
+{
+  const P = [
+    [0.5, 0.2, 0.1, 0.1, 0.1],
+    [0.2, 0.5, 0.1, 0.1, 0.1],
+  ];
+  const cls = ["a", "b"];
+  const c = AID.nearestCentroid(P[0], P, cls);
+  ok(c.name === "a" && c.d >= 0, "nearestCentroid finds its own class centroid");
+}
+
 /* ── search: normalization, suggestions, query execution ────────────── */
 {
   ok(AID.normQuery("Chocolate Chips") === "chocolate chip", "normQuery plural");
@@ -150,6 +161,29 @@ ok(AID.colorOf("unknown_class") === "#777777", "palette fallback");
   ], data);
   ok(r.count === 1 && r.mask[3], "AND across types");
 
+  // explicit connectors override the defaults
+  ok(AID.suggest("or", data)[0].type === "op", "suggest offers the OR connector");
+  r = AID.runSearch([
+    { type: "class", label: "cookie" },
+    { type: "op", op: "or" },
+    { type: "ingredient", head: "walnuts", label: "walnuts" },
+  ], data);
+  ok(r.count === 2 && r.mask[1] && r.mask[3], "explicit OR");
+  r = AID.runSearch([
+    { type: "ingredient", head: "chocolate chips", label: "chocolate chips" },
+    { type: "op", op: "and" },
+    { type: "ingredient", head: "walnuts", label: "walnuts" },
+  ], data);
+  ok(r.count === 0, "explicit AND overrides the ingredient-OR default");
+  r = AID.runSearch([
+    { type: "class", label: "cookie" },
+    { type: "op", op: "or" },
+    { type: "ingredient", head: "walnuts", label: "walnuts" },
+    { type: "op", op: "and" },
+    { type: "keyword", label: "walnut" },
+  ], data);
+  ok(r.count === 1 && r.mask[1], "connectors evaluate left-to-right");
+
   // keyword
   r = AID.runSearch([{ type: "keyword", label: "cake" }], data);
   ok(r.count === 2 && r.mask[0] && r.mask[2], "keyword substring");
@@ -164,6 +198,56 @@ ok(AID.colorOf("unknown_class") === "#777777", "palette fallback");
   // empty search = everything
   r = AID.runSearch([], data);
   ok(r.mask === null && r.count === 5, "empty search shows all");
+
+  // a ratioeq token is an overlay: it never filters
+  r = AID.runSearch([
+    { type: "ratioeq", ops: [{ idx: [0], k: 2 }, { idx: [3], k: 1 }] },
+  ], data);
+  ok(r.mask === null && r.count === 5, "ratioeq does not filter");
+}
+
+/* ── ratio equations: parsing and locus geometry ─────────────────────── */
+{
+  const eq = AID.parseRatioEq("flour : fat = 2 : 1");
+  ok(eq && eq.type === "ratioeq" && eq.ops.length === 2, "parse two-term ratio");
+  ok(eq.ops[0].idx[0] === 0 && eq.ops[0].k === 2, "parse left operand and coefficient");
+  ok(eq.ops[1].idx[0] === 3 && eq.ops[1].k === 1, "parse right operand and coefficient");
+
+  const eq3 = AID.parseRatioEq("flour : fat : sugar = 4 : 2 : 1");
+  ok(eq3 && eq3.ops.length === 3, "parse three-term ratio");
+  ok(AID.parseRatioEq("flour : rich = 2 : 1").ops[1].idx.join(",") === "3,4",
+     "merged-group operand");
+  ok(AID.parseRatioEq("flour fat 2 1") === null, "reject without : and =");
+  ok(AID.parseRatioEq("flour : fat = 2") === null, "reject mismatched term counts");
+  ok(AID.parseRatioEq("flour : rocks = 2 : 1") === null, "reject unknown operand");
+  ok(AID.parseRatioEq("flour : fat = 2 : 0") === null, "reject non-positive coefficient");
+
+  // flour : fat = 2 : 1 -> p0 = 2 p3; four vertices, all on the simplex
+  const verts = AID.ratioLocusVertices([
+    { idx: [0], k: 2 }, { idx: [3], k: 1 },
+  ]);
+  ok(verts.length === 4, "flour:fat locus has four vertices");
+  for (const v of verts) {
+    const s = v.reduce((a, b) => a + b, 0);
+    close(s, 1, 1e-6, "locus vertex on the simplex");
+    close(v[0], 2 * v[3], 1e-6, "locus vertex satisfies flour = 2 fat");
+  }
+  const corner = verts.find(v => v[1] > 0.99);
+  ok(corner && corner[0] === 0 && corner[3] === 0, "pure-liquid corner is a vertex");
+
+  // a triple ratio pins a polygon (dim 2): flour:fat:sugar = 4:2:1
+  const poly = AID.ratioLocusVertices([
+    { idx: [0], k: 4 }, { idx: [3], k: 2 }, { idx: [4], k: 1 },
+  ]);
+  ok(poly.length >= 3, "three-term locus has a polygon of vertices");
+  for (const v of poly) {
+    close(v[0], 2 * v[3], 1e-6, "triple vertex flour = 2 fat");
+    close(v[4], v[3] / 2, 1e-6, "triple vertex sugar = fat / 2");
+  }
+
+  // convex hull
+  const hull = AID.hull2([[0, 0], [1, 0], [1, 1], [0, 1], [0.5, 0.5]]);
+  ok(hull.length === 4, "hull2 drops interior points");
 }
 
 /* ── grouping edits (divider bar) ────────────────────────────────────── */
@@ -217,6 +301,14 @@ ok(AID.colorOf("unknown_class") === "#777777", "palette fallback");
   ok(AID.birthParent([[0], [1, 2], [3]], AID.pullOut([[0], [1, 2], [3]], 4)) === null,
      "birthParent is null for a resurrected (rest) part");
 
+  // mergedPair finds the two old groups a 4->3 change combined
+  const canon3 = AID.splitGroup(canon2, 1);
+  ok(JSON.stringify(AID.mergedPair(canon3, canon2)) === "[1,3]",
+     "mergedPair finds the merged base corner and apex");
+  ok(JSON.stringify(AID.mergedPair(canon3, AID.mergeGroups(canon3, 0, 1))) === "[0,1]",
+     "mergedPair finds two merged base corners");
+  ok(AID.mergedPair(canon2, canon2) === null, "mergedPair is null when nothing merged");
+
   // setBirthAt: a split pins the two untouched corners and hides the apex
   const _tv = [0, 0, 0];
   const _proj = b => { AID.project3(b, 0, 0, _tv); return _tv.slice(); };
@@ -254,7 +346,7 @@ std.loadScript("web/app/views.js");
     archetypes: [{ name: "pound_cake", P: [0.25, 0, 0.25, 0.25, 0.25] },
                  { name: "bread", P: [0.6, 0.4, 0, 0, 0] }],
   };
-  const vstore = AID.createStore({ selection: 2, matches: null });
+  const vstore = AID.createStore({ selection: 2, matches: null, showNeighbourhood: true });
   const noop = () => {};
   const stubCtx = {};
   for (const m of ["beginPath", "moveTo", "lineTo", "stroke", "fill", "arc", "closePath",
@@ -299,9 +391,18 @@ std.loadScript("web/app/views.js");
       p.draw(stubCtx, 800, 600);
       p.hit(200, 200);
       p.value(0);
+      ok(p.nb && p.nb.count >= 1, label + " reports a data-space neighbourhood");
     } catch (e) { err = e; }
     ok(!err, label + " painter executes" + (err ? ": " + err : ""));
   }
+
+  // the neighbourhood is optional: with it switched off no disc is reported
+  vstore.set({ showNeighbourhood: false });
+  const pOff = AID.view2(cacheFor(AID.resolveGroups("canon2")), vdata, vstore);
+  pOff.reset(800, 600);
+  pOff.draw(stubCtx, 800, 600);
+  ok(pOff.nb === null, "neighbourhood can be switched off");
+  vstore.set({ showNeighbourhood: true });
 
   // the 2D <-> 3D birth phase must draw without error (the engine owns the
   // frame and only the newborn corner is faded)
@@ -319,6 +420,36 @@ std.loadScript("web/app/views.js");
   } catch (e) { berr = e; }
   ok(!berr, "3D birth phase draws" + (berr ? ": " + berr : ""));
   AID.setBirthAt(null, 0); AID.birthE = 1;
+
+  // the 3D painter can draw a driven, morphing wireframe and archetypes (the
+  // 3D->2D fold): corners and stars come from overrides in frame space.
+  let werr = null;
+  try {
+    const p = AID.view3(cacheFor(AID.resolveGroups("canon3")), vdata, vstore);
+    p.reset(800, 600);
+    p.setZoom(1);
+    p.wire = [[0, 0], [1, 0], [0.5, 0.8660254], [0.5, 0.4]];
+    p.arch = [[0.2, 0.2], [0.6, 0.3]];
+    p.draw(stubCtx, 800, 600);
+    ok(p.wireCorners().length === 4, "wireCorners returns four frame points");
+    ok(p.archPoints().length === 2, "archPoints returns one point per archetype");
+  } catch (e) { werr = e; }
+  ok(!werr, "3D painter draws a driven wireframe" + (werr ? ": " + werr : ""));
+
+  // face-on and small so two corners line up: the fused merge glyph draws
+  // (union path) without an infinity marker.
+  let merr = null;
+  try {
+    const c = cacheFor(AID.resolveGroups("canon3"));
+    const p = AID.view3(c, vdata, vstore);
+    p.setCamera(0, 0);
+    p.reset(160, 160);
+    p.draw(stubCtx, 160, 160);
+    p.hover = 1;
+    p.draw(stubCtx, 160, 160);
+    ok(p.mergePair !== null, "merge glyph appears when corners align");
+  } catch (e) { merr = e; }
+  ok(!merr, "merge glyph draws" + (merr ? ": " + merr : ""));
 }
 
 /* ── syntax-parse the DOM modules (no execution under qjs) ───────────── */

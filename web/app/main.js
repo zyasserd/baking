@@ -16,6 +16,7 @@
     groups: AID.resolveGroups("canon2"),
     selection: -1,
     classFilter: [],
+    showNeighbourhood: true,
   });
 
   const plotCtl = AID.attachPlot(
@@ -31,7 +32,19 @@
 
   AID.attachDividerBar(document.getElementById("ratio"), store);
 
-  AID.attachPanel(document.getElementById("panel"), store, data);
+  const panelCtl = AID.attachPanel(document.getElementById("recipe"), store, data);
+
+  const nbBtn = document.getElementById("nbtoggle");
+  nbBtn.setAttribute("aria-pressed", String(store.get().showNeighbourhood));
+  nbBtn.addEventListener("click", () => {
+    const on = !store.get().showNeighbourhood;
+    store.set({ showNeighbourhood: on });
+    nbBtn.setAttribute("aria-pressed", String(on));
+  });
+
+  // The painter owns the screen-space neighbourhood (it depends on the current
+  // projection); the plot forwards it here to feed the ratio card's donut.
+  AID.onNeighbourhood = nb => panelCtl.setNeighbourhood(nb);
 
   document.getElementById("reset").addEventListener("click", () => {
     // clear the query and the family filter first, then reset the geometry
