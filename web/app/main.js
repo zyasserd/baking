@@ -47,14 +47,4 @@
   // The painter owns the screen-space neighbourhood (it depends on the current
   // projection); the plot forwards it here to feed the ratio card's donut.
   AID.onNeighbourhood = nb => panelCtl.setNeighbourhood(nb);
-
-  document.getElementById("reset").addEventListener("click", () => {
-    // clear the query and the family filter first, then reset the geometry
-    store.set({ classFilter: [], selection: -1 });
-    if (searchCtl) searchCtl.clear();
-    store.set({
-      partition: "canon2",
-      groups: AID.resolveGroups("canon2"),
-    });
-  });
 })();

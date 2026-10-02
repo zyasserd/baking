@@ -5,6 +5,7 @@
   --line: #e3e3dc;
   --accent: #4e79a7;
   --navh: 48px;
+  --panelw: 360px;
 }
 
 * { box-sizing: border-box; margin: 0; }
@@ -192,7 +193,9 @@ body {
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 10px 16px;
+  /* right inset matches the panel so the search row lines up with the ratio
+   * bar and plot below it (all control the same left workspace) */
+  padding: 10px calc(var(--panelw) + 1px + 16px) 10px 16px;
   border-bottom: 1px solid var(--line);
   flex: none;
 }
@@ -202,7 +205,6 @@ h1 { font-size: 15px; font-weight: 650; letter-spacing: 0.01em; }
 #searchbar {
   position: relative;
   flex: 1;
-  max-width: 720px;
   min-width: 0;
 }
 
@@ -385,7 +387,7 @@ main {
  * area takes the remaining height and scrolls on its own, so swapping the
  * intro for a tall recipe card never pushes the controls below it. */
 #panel {
-  width: 360px;
+  width: var(--panelw);
   flex-shrink: 0;
   border-left: 1px solid var(--line);
   display: flex;
@@ -417,19 +419,6 @@ main {
 }
 
 #status { color: var(--muted); }
-
-#reset {
-  padding: 5px 12px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: #fff;
-  font: inherit;
-  font-size: 12px;
-  color: var(--muted);
-  cursor: pointer;
-}
-
-#reset:hover { color: var(--fg); }
 
 #nbtoggle {
   display: flex;
@@ -842,8 +831,8 @@ main {
   }
 
   #app { overflow-y: auto; }
-  #appbar { flex-wrap: wrap; gap: 8px; }
-  #searchbar { order: 3; flex-basis: 100%; max-width: none; }
+  #appbar { flex-wrap: wrap; gap: 8px; padding-right: 16px; }
+  #searchbar { order: 3; flex-basis: 100%; }
 
   .readout { font-size: 18px; }
   .pclabel { width: 92px; }

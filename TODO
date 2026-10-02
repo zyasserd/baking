@@ -1,12 +1,9 @@
-- search bar alignment is a bit weird also there is both reset buttons and an x button inside, remove the reset
-
 - github
-    - upload
     - actions
 - readme move mostly to about
     - then make the readme for github with disclaimer it's "vibe coded" (or a better term)
     - also the fact the the preprocessing is not perfect
-    - add github link
+    - add github link in the toolbar
 
 - qjs
 
