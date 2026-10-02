@@ -66,6 +66,9 @@
       cache, data, store,
       nb: null, // set by draw(): the current screen-space neighbourhood
       sel: () => store.get().selection,
+      /* A point is pickable only when no search/filter is active or when it
+       * survives that filter: you can never open a recipe the query excluded. */
+      matchActive: i => { const m = store.get().matches; return !m || !!m[i]; },
       /* archetype frame coords for this partition */
       archBary: AID.bary(data.archetypes.map(a => a.P), cache.groups),
     };
@@ -462,6 +465,7 @@
         const arr = grid.get((cx + 2000) * 4000 + cy);
         if (!arr) continue;
         for (const i of arr) {
+          if (!this.matchActive(i)) continue;
           const dx = frame[i * 2] - fx, dy = frame[i * 2 + 1] - fy;
           const d = dx * dx + dy * dy;
           if (d < bd) { bd = d; best = i; }
@@ -734,6 +738,7 @@
       }
       let best = -1, bd = Infinity;
       for (const i of [lo, Math.max(0, lo - 1)]) {
+        if (!this.matchActive(pts[i])) continue;
         const d = Math.abs(values[pts[i]] - mxv);
         if (d < bd) { bd = d; best = pts[i]; }
       }
@@ -1042,6 +1047,7 @@
       const r = HOVER_R, r2 = r * r;
       let best = -1, bd = r2;
       for (let i = 0; i < n; i++) {
+        if (!this.matchActive(i)) continue;
         const dx = sx(screen[i * 2]) - mx, dy = sy(screen[i * 2 + 1]) - my;
         const d = dx * dx + dy * dy;
         if (d < bd) { bd = d; best = i; }

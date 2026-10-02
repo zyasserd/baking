@@ -7,44 +7,193 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header>
-  <h1>Baker's Aid</h1>
-  <div id="searchbar">
-    <div id="searchrow">
-      <span id="chips"></span>
-      <input id="search" type="text" aria-label="search recipes"
-        placeholder="search: ingredient, class, keyword, ratio, e.g. flour : fat = 2 : 1" disabled>
-      <button id="searchclear" type="button" aria-label="clear search and filters"
-        title="clear search and filters">×</button>
-    </div>
-    <span id="count"></span>
-    <div id="dropdown" role="listbox"></div>
-  </div>
-  <button id="reset" title="reset to flour : wet : rich">reset</button>
+<header id="topnav">
+  <a class="brand" href="#home" data-nav="home">
+    <svg class="brandmark" viewBox="80 38 350 436" aria-hidden="true">
+      <path d="M215.798 96.7481C235.745 64.334 271.991 42.667 313.122 42.667C375.669 42.667 426.646 92.6616 426.646 154.667C426.646 209.179 387.239 254.412 335.217 264.545V352H176.741V266.066C155.644 263.711 134.826 254.579 118.48 241.161C99.3818 225.484 85.3125 202.996 85.3125 177.186C85.3125 127.605 126.201 87.704 175.979 87.704C190.69 87.704 203.975 90.9928 215.798 96.7481Z" fill="currentColor"/>
+        <path d="M176.727 373.333V437.333C176.727 455.006 191.053 469.333 208.727 469.333H303.203C320.876 469.333 335.203 455.006 335.203 437.333V373.333H176.727Z" fill="#9fbcd8"/>
+    </svg>
+    <span>Baker's Aid</span>
+  </a>
+  <nav class="navlinks">
+    <a href="#app" id="nav-main" data-nav="app">app</a>
+    <a href="#about" data-nav="about">about</a>
+  </nav>
 </header>
-<main>
-  <section id="stage">
-    <nav id="ratio" aria-label="ratio compartments"></nav>
-    <section id="plot">
-      <canvas id="canvas"></canvas>
-      <div id="tooltip"></div>
-    </section>
+
+<section id="view-home" class="view">
+  <section id="hero">
+    <div class="hero-inner">
+      <h1 class="brandline">Baker's <span class="aid">Aid<svg class="toque" viewBox="80 38 350 436" role="img" aria-label="chef's toque">
+        <path d="M215.798 96.7481C235.745 64.334 271.991 42.667 313.122 42.667C375.669 42.667 426.646 92.6616 426.646 154.667C426.646 209.179 387.239 254.412 335.217 264.545V352H176.741V266.066C155.644 263.711 134.826 254.579 118.48 241.161C99.3818 225.484 85.3125 202.996 85.3125 177.186C85.3125 127.605 126.201 87.704 175.979 87.704C190.69 87.704 203.975 90.9928 215.798 96.7481Z" fill="currentColor"/>
+      <path d="M176.727 373.333V437.333C176.727 455.006 191.053 469.333 208.727 469.333H303.203C320.876 469.333 335.203 455.006 335.203 437.333V373.333H176.727Z" fill="#9fbcd8"/>
+      </svg></span></h1>
+      <p class="tagline">Do the ratios predict the baked good?</p>
+      <p class="sub">Millions of recipes, each reduced to five structural parts:
+        flour, liquid, egg, fat, and sugar. Search, regroup, and see where a
+        recipe really lives.</p>
+      <a class="cta" href="#app" data-nav="app">Explore the ratios
+        <span aria-hidden="true">↓</span></a>
+    </div>
+    <a class="scrollhint" href="#app" data-nav="app" aria-label="open the app">
+      <span aria-hidden="true">↓</span>
+    </a>
   </section>
-  <aside id="panel">
-    <section class="psec" id="recipe"><p id="status">loading…</p></section>
-    <section class="psec">
-      <div class="phead">families</div>
-      <nav id="legend" aria-label="family filters"></nav>
-    </section>
-    <section class="psec">
-      <div class="phead">display</div>
-      <button id="nbtoggle" type="button" aria-pressed="true"
-        title="highlight the selected recipe's neighbourhood (dish and links)">
-        <span class="sw" aria-hidden="true"></span>neighbourhood
-      </button>
-    </section>
-  </aside>
-</main>
+</section>
+
+<section id="app" class="view" hidden>
+    <div id="appbar">
+      <div id="searchbar">
+        <div id="searchrow">
+          <span id="chips"></span>
+          <input id="search" type="text" aria-label="search recipes"
+            placeholder="search: ingredient, class, keyword, ratio, e.g. flour : fat = 2 : 1" disabled>
+          <span id="count"></span>
+          <button id="searchclear" type="button" aria-label="clear search and filters"
+            title="clear search and filters">×</button>
+        </div>
+        <div id="dropdown" role="listbox"></div>
+      </div>
+      <button id="reset" title="reset to flour : wet : rich">reset</button>
+    </div>
+    <main>
+      <section id="stage">
+        <nav id="ratio" aria-label="ratio compartments"></nav>
+        <section id="plot">
+          <canvas id="canvas"></canvas>
+          <div id="tooltip"></div>
+        </section>
+      </section>
+      <aside id="panel">
+        <section class="psec" id="recipe"><p id="status">loading…</p></section>
+        <section class="psec">
+          <div class="phead">families</div>
+          <nav id="legend" aria-label="family filters"></nav>
+        </section>
+        <section class="psec">
+          <div class="phead">display</div>
+          <button id="nbtoggle" type="button" aria-pressed="true"
+            title="highlight the selected recipe's neighbourhood (dish and links)">
+            <span class="sw" aria-hidden="true"></span>neighbourhood
+          </button>
+        </section>
+      </aside>
+    </main>
+</section>
+
+<section id="view-about" class="view" hidden>
+  <div class="prose">
+    <p class="eyebrow">about</p>
+    <h2>What is this?</h2>
+    <p>Michael Ruhlman's <i>Ratio</i> claims that the base ingredient ratios
+      determine what kind of baked good you get. This project tests that at
+      scale: <b class="num" id="about-total">2,231,142</b> recipes are reduced to
+      five structural parts and scored against the <b>independent</b> class
+      labels Food.com attached to them. The ratios are the features, the tags
+      are the labels, and the two are never allowed to peek at each other.</p>
+    <p>The result is a partial yes. The classes are <i>described</i> in ratio
+      space, not predicted from it: their centroids sit where the book says they
+      should (cake leans rich, bread leans flour, cookies sit in the middle),
+      but the classes overlap almost completely. Baking looks like a
+      <b>continuum</b>, and the Food.com tags are fuzzy labels painted on it.
+      Nothing here is clustered or compressed: the geometry you see is the
+      geometry that was computed.</p>
+
+    <h2>The Aid</h2>
+    <p>Every recipe is a point on the simplex of its five parts. A
+      <b>partition</b> groups those parts: two groups make a 1-D axis, three a
+      triangle, four a tetrahedron. The divider bar above the plot lets you drag
+      parts between compartments and watch the space fold. Search highlights
+      where your query lives; click a point for its ratio card, its nearest book
+      archetype, and its class neighbourhood.</p>
+
+    <h2>Where the data comes from</h2>
+    <p class="muted">Three independent corpora meet at exactly one place: the
+      numeric Food.com id at the end of each RecipeNLG link. The join is the
+      only point of contact between the ingredients and the labels.</p>
+    <div class="datasets">
+      <article class="dataset">
+        <h4>RecipeNLG</h4>
+        <p class="dmeta">2.23 M recipes · ~2.3 GB</p>
+        <p>Raw ingredient text and source links. Bien et al. 2020. Supplies the
+          recipe lines that get parsed.</p>
+        <a href="https://recipenlg.cs.put.poznan.pl/dataset" target="_blank"
+          rel="noopener">recipenlg.cs.put.poznan.pl</a>
+      </article>
+      <article class="dataset">
+        <h4>Food.com</h4>
+        <p class="dmeta">267,782 recipes</p>
+        <p>Tags, the independent class labels, plus per-recipe nutrition.
+          shuyangli94 on Kaggle, 2019.</p>
+        <a href="https://www.kaggle.com/datasets/shuyangli94/food-com-recipes-and-user-interactions"
+          target="_blank" rel="noopener">kaggle.com/shuyangli94</a>
+      </article>
+      <article class="dataset">
+        <h4>USDA FoodData Central</h4>
+        <p class="dmeta">7,793 foods · SR Legacy 2018-04</p>
+        <p>The final Standard Reference release. Per-100 g proximates decompose
+          each ingredient head into structural parts.</p>
+        <a href="https://fdc.nal.usda.gov/" target="_blank"
+          rel="noopener">fdc.nal.usda.gov</a>
+      </article>
+    </div>
+
+    <h2>How the recipes were made</h2>
+    <p class="muted">Stage 1 turns the raw corpora into
+      <code>data/processed/recipes_simplex.csv</code>. It knows nothing about
+      the method or the Aid.</p>
+    <div class="flow">
+      <div class="fsplit">
+        <div class="fnode"><b>RecipeNLG</b><small>ingredient text, source links</small></div>
+        <div class="fnode"><b>Food.com</b><small>tags + nutrition</small></div>
+      </div>
+      <div class="farrow">↓</div>
+      <div class="fnode"><b>Join</b><small>on the numeric Food.com recipe id at the end of each link</small></div>
+      <div class="farrow">↓</div>
+      <div class="fnode"><b>Label</b><small>Food.com tags to one baking family; title rescues for under-tagged pastry and brownies</small></div>
+      <div class="farrow">↓</div>
+      <div class="fnode"><b>Exclude</b><small>mixes, prepared dough, purchased bread, no-bake and topping-only titles</small></div>
+      <div class="farrow">↓</div>
+      <div class="fnode"><b>Parse</b><small>each ingredient line to quantity + unit + head (fractions, ranges, notes)</small></div>
+      <div class="farrow">↓</div>
+      <div class="fnode"><b>Density</b><small>(quantity, unit, head) to grams; USDA container weights, 1 egg = 50 g, name-aware</small></div>
+      <div class="farrow">↓</div>
+      <div class="fnode"><b>Decompose</b><small>head to a USDA FoodData Central food, then per-100 g proximates: water to liquid, lipid to fat, sugars to sugar, starch to flour, sodium to salt</small></div>
+      <div class="farrow">↓</div>
+      <div class="fnode"><b>Fold</b><small>significant structural grams to five parts, closed to proportions that sum to 1; frostings and glazes never pool in</small></div>
+      <div class="farrow">↓</div>
+      <div class="fnode final"><b>recipes_simplex.csv</b><small>one row per kept recipe: identity, tags, structural grams, simplex shares, nutrition</small></div>
+    </div>
+
+    <h3>From corpus to dataset</h3>
+    <p class="muted">Row accounting from the last stage-1 run. Each bar is the
+      number of recipes surviving at that step.</p>
+    <div class="funnel" id="funnel"></div>
+
+    <h2>Then the method</h2>
+    <p class="muted">Stage 2 reads only the dataset contract. It gates outliers
+      and describes the tag classes in ratio space, the same geometry the Aid
+      draws.</p>
+    <div class="flow">
+      <div class="fnode"><b>recipes_simplex.csv</b></div>
+      <div class="farrow">↓</div>
+      <div class="fnode"><b>Outlier gate</b><small>robust Mahalanobis distance in ILR (compositional) coordinates</small></div>
+      <div class="farrow">↓</div>
+      <div class="fnode"><b>Describe families</b><small>per-class centroids, a richness axis (fat + sugar share), tag-class separation</small></div>
+      <div class="farrow">↓</div>
+      <div class="fsplit">
+        <div class="fnode"><b>method diagnostics</b><small>extreme recipes, outlier tail, quality bases, curation queue (CSV only)</small></div>
+        <div class="fnode final"><b>bakers_aid.html</b><small>this page: data.js + UI packed into one self-contained file</small></div>
+      </div>
+    </div>
+
+    <p class="foot">Stage 1 is verified byte-identical across runs, and the
+      dataset is committed, so the Aid rebuilds without the raw download.
+      Everything is plain Python and vanilla JavaScript, with no framework and
+      no server.</p>
+  </div>
+</section>
+
 <!-- The data script: referenced by relative path for the dev loop (works over
      file://); the packer replaces this line with the inlined data. -->
 <script src="../output/aid/data.js"></script>
@@ -58,6 +207,8 @@
 <script src="app/dividerbar.js"></script>
 <script src="app/plot.js"></script>
 <script src="app/panel.js"></script>
+<script src="app/nav.js"></script>
+<script src="app/about.js"></script>
 <script src="app/main.js"></script>
 </body>
 </html>

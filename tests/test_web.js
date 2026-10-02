@@ -453,7 +453,7 @@ std.loadScript("web/app/views.js");
 }
 
 /* ── syntax-parse the DOM modules (no execution under qjs) ───────────── */
-for (const f of ["web/app/views.js", "web/app/plot.js", "web/app/searchbar.js", "web/app/legend.js", "web/app/dividerbar.js", "web/app/panel.js", "web/app/main.js"]) {
+for (const f of ["web/app/views.js", "web/app/plot.js", "web/app/searchbar.js", "web/app/legend.js", "web/app/dividerbar.js", "web/app/panel.js", "web/app/nav.js", "web/app/about.js", "web/app/main.js"]) {
   let src;
   try {
     src = std.read_file(f);

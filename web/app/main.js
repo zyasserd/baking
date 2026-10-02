@@ -5,11 +5,13 @@
 
   const status = document.getElementById("status");
   if (typeof AID_DATA === "undefined") {
-    status.textContent = "no data — run scripts/analyze.py first";
+    status.textContent = "no data: run scripts/analyze.py first";
     return;
   }
   const data = AID_DATA;
   status.style.display = "none";
+
+  if (AID.fillAbout) AID.fillAbout(data);
 
   const store = AID.createStore({
     partition: "canon2",
