@@ -1,4 +1,11 @@
-- icon
+- instead of 1, 2, 3, 4 for the vertices
+    - call them A, B, C, D so that you are able to reference that in the ratios in the serch bar
+- allow us to refer to combinations
+    - liquid + egg = wet
+    - fat + sugar = ?
+- `fat+sugar : floor = 2:1` doesn't work
+
+- search bar alignment is a bit weird
 
 - simplify
 
@@ -7,6 +14,7 @@
     - actions
 - readme move mostly to about
     - then make the readme for github with disclaimer it's "vibe coded" (or a better term)
+    - also the fact the the preprocessing is not perfect
     - add github link
 
 ---
@@ -17,6 +25,3 @@
     - would be nice to display the simple ratio
     - also how to pick the architype and display it in the sidebar
 
-- liquid + egg = wet
-- fat + sugar = ?
-- `fat+sugar = 2:1` doesn't work
