@@ -122,6 +122,8 @@
       drawFocusMarks: function (ctx) {
         const f = this.focus();
         if (!f) return;
+        if (f.kind === "archetype" && !this.showArchetypes()) return;
+        if (f.kind === "class" && !this.showCentroids()) return;
         for (const mk of this._markers || []) {
           if (mk.kind !== f.kind || mk.id !== f.id) continue;
           const r = mk.kind === "archetype" ? 13 : 11;
@@ -141,6 +143,9 @@
       },
       /* archetype frame coords for this partition */
       archBary: AID.bary(data.archetypes.map(a => a.P), cache.groups),
+      /* Marker layers, toggled from the display panel (default on). */
+      showArchetypes: () => store.get().showArchetypes !== false,
+      showCentroids: () => store.get().showCentroids !== false,
     };
   }
 
@@ -512,12 +517,16 @@
         archPos[this.data.archetypes[a].name] = [atmp[0], atmp[1]];
       }
       this._markers = [];
-      for (const [c, x, y] of cents) {
-        this._markers.push({ kind: "class", id: c, x: this.sx(x), y: this.sy(y), r: 12 });
+      if (this.showCentroids()) {
+        for (const [c, x, y] of cents) {
+          this._markers.push({ kind: "class", id: c, x: this.sx(x), y: this.sy(y), r: 12 });
+        }
       }
-      for (const nm in archPos) {
-        this._markers.push({ kind: "archetype", id: nm,
-          x: this.sx(archPos[nm][0]), y: this.sy(archPos[nm][1]), r: 14 });
+      if (this.showArchetypes()) {
+        for (const nm in archPos) {
+          this._markers.push({ kind: "archetype", id: nm,
+            x: this.sx(archPos[nm][0]), y: this.sy(archPos[nm][1]), r: 14 });
+        }
       }
 
       // dotted lines to the nearest centroid and nearest book archetype
@@ -526,24 +535,30 @@
         const nc = AID.nearestCentroid(rp, this.data.recipes.P, clsArr);
         const na = AID.aitchisonNearest(rp, this.data.archetypes);
         const x1 = this.sx(frame[sel * 2]), y1 = this.sy(frame[sel * 2 + 1]);
-        for (const [c, x, y] of cents) {
-          if (c === nc.name) dottedLink(ctx, x1, y1, this.sx(x), this.sy(y));
+        if (this.showCentroids()) {
+          for (const [c, x, y] of cents) {
+            if (c === nc.name) dottedLink(ctx, x1, y1, this.sx(x), this.sy(y));
+          }
         }
-        if (archPos[na.name]) {
+        if (this.showArchetypes() && archPos[na.name]) {
           dottedLink(ctx, x1, y1, this.sx(archPos[na.name][0]), this.sy(archPos[na.name][1]));
         }
       }
 
       // markers over everything: class centres, then book archetypes
-      const focus = this.focus();
-      for (const [c, x, y] of cents) diamond(ctx, this.sx(x), this.sy(y), 5.5, AID.colorOf(c));
-      ctx.fillStyle = "#3a3a35";
-      for (let a = 0; a < this.archBary.length / 3; a++) {
-        const ap = archPos[this.data.archetypes[a].name];
-        star(ctx, this.sx(ap[0]), this.sy(ap[1]), 8);
-        ctx.font = "600 11px system-ui, sans-serif";
-        ctx.fillText(this.data.archetypes[a].name,
-          this.sx(ap[0]), this.sy(ap[1]) - 12);
+      if (this.showCentroids()) {
+        for (const [c, x, y] of cents)
+          diamond(ctx, this.sx(x), this.sy(y), 5.5, AID.colorOf(c));
+      }
+      if (this.showArchetypes()) {
+        ctx.fillStyle = "#3a3a35";
+        for (let a = 0; a < this.archBary.length / 3; a++) {
+          const ap = archPos[this.data.archetypes[a].name];
+          star(ctx, this.sx(ap[0]), this.sy(ap[1]), 8);
+          ctx.font = "600 11px system-ui, sans-serif";
+          ctx.fillText(this.data.archetypes[a].name,
+            this.sx(ap[0]), this.sy(ap[1]) - 12);
+        }
       }
       this.drawFocusMarks(ctx);
 
@@ -780,17 +795,21 @@
       const meanVal = {};
       for (const c in cmeans) meanVal[c] = AID.bary([cmeans[c]], groups)[0] * 100;
       this._markers = [];
-      for (const c in meanVal) {
-        const r = order.indexOf(c);
-        if (r < 0) continue;
-        this._markers.push({ kind: "class", id: c,
-          x: sx(meanVal[c]), y: TOP + r * rowH + rowH / 2, r: 12 });
+      if (this.showCentroids()) {
+        for (const c in meanVal) {
+          const r = order.indexOf(c);
+          if (r < 0) continue;
+          this._markers.push({ kind: "class", id: c,
+            x: sx(meanVal[c]), y: TOP + r * rowH + rowH / 2, r: 12 });
+        }
       }
-      for (let a = 0; a < this.archBary.length / k; a++) {
-        const v = this.archBary[a * k] * 100;
-        if (v < X0 || v > X1) continue;
-        this._markers.push({ kind: "archetype", id: this.data.archetypes[a].name,
-          x: sx(v), y: (TOP + H_ - 30) / 2, tall: true, y0: TOP, y1: H_ - 30, r: 10 });
+      if (this.showArchetypes()) {
+        for (let a = 0; a < this.archBary.length / k; a++) {
+          const v = this.archBary[a * k] * 100;
+          if (v < X0 || v > X1) continue;
+          this._markers.push({ kind: "archetype", id: this.data.archetypes[a].name,
+            x: sx(v), y: (TOP + H_ - 30) / 2, tall: true, y0: TOP, y1: H_ - 30, r: 10 });
+        }
       }
 
       order.forEach((c, r) => {
@@ -838,17 +857,20 @@
         ctx.globalAlpha = 1;
 
         // class centre (geometric mean) on this row
-        if (pts.length) diamond(ctx, sx(meanVal[c]), yMid, 5.5, AID.colorOf(c));
+        if (pts.length && this.showCentroids())
+          diamond(ctx, sx(meanVal[c]), yMid, 5.5, AID.colorOf(c));
 
         // archetype ticks
-        ctx.strokeStyle = "#3a3a35";
-        for (let a = 0; a < this.archBary.length / k; a++) {
-          const v = this.archBary[a * k] * 100;
-          if (v < X0 || v > X1) continue;
-          ctx.beginPath();
-          ctx.moveTo(sx(v), yTop + rowH * 0.25);
-          ctx.lineTo(sx(v), yTop + rowH * 0.75);
-          ctx.stroke();
+        if (this.showArchetypes()) {
+          ctx.strokeStyle = "#3a3a35";
+          for (let a = 0; a < this.archBary.length / k; a++) {
+            const v = this.archBary[a * k] * 100;
+            if (v < X0 || v > X1) continue;
+            ctx.beginPath();
+            ctx.moveTo(sx(v), yTop + rowH * 0.25);
+            ctx.lineTo(sx(v), yTop + rowH * 0.75);
+            ctx.stroke();
+          }
         }
 
         // row label
@@ -1123,12 +1145,16 @@
         }
       }
       this._markers = [];
-      for (const [c, x, y] of cents) {
-        this._markers.push({ kind: "class", id: c, x: sx(x), y: sy(y), r: 12 });
+      if (this.showCentroids()) {
+        for (const [c, x, y] of cents) {
+          this._markers.push({ kind: "class", id: c, x: sx(x), y: sy(y), r: 12 });
+        }
       }
-      for (const nm in archPos) {
-        this._markers.push({ kind: "archetype", id: nm,
-          x: sx(archPos[nm][0]), y: sy(archPos[nm][1]), r: 14 });
+      if (this.showArchetypes()) {
+        for (const nm in archPos) {
+          this._markers.push({ kind: "archetype", id: nm,
+            x: sx(archPos[nm][0]), y: sy(archPos[nm][1]), r: 14 });
+        }
       }
 
       // dotted lines to the nearest centroid and nearest book archetype
@@ -1137,22 +1163,28 @@
         const nc = AID.nearestCentroid(rp, this.data.recipes.P, clsArr);
         const na = AID.aitchisonNearest(rp, this.data.archetypes);
         const x1 = sx(screen[sel * 2]), y1 = sy(screen[sel * 2 + 1]);
-        for (const [c, x, y] of cents) {
-          if (c === nc.name) dottedLink(ctx, x1, y1, sx(x), sy(y));
+        if (this.showCentroids()) {
+          for (const [c, x, y] of cents) {
+            if (c === nc.name) dottedLink(ctx, x1, y1, sx(x), sy(y));
+          }
         }
-        if (archPos[na.name]) {
+        if (this.showArchetypes() && archPos[na.name]) {
           dottedLink(ctx, x1, y1, sx(archPos[na.name][0]), sy(archPos[na.name][1]));
         }
       }
 
       // markers over everything: class centres, then book archetypes
-      for (const [c, x, y] of cents) diamond(ctx, sx(x), sy(y), 5.5, AID.colorOf(c));
-      ctx.fillStyle = "#3a3a35";
-      for (let a = 0; a < this.archBary.length / 4; a++) {
-        const ap = archPos[this.data.archetypes[a].name];
-        star(ctx, sx(ap[0]), sy(ap[1]), 8);
-        ctx.font = "600 11px system-ui, sans-serif";
-        ctx.fillText(this.data.archetypes[a].name, sx(ap[0]), sy(ap[1]) - 12);
+      if (this.showCentroids()) {
+        for (const [c, x, y] of cents) diamond(ctx, sx(x), sy(y), 5.5, AID.colorOf(c));
+      }
+      if (this.showArchetypes()) {
+        ctx.fillStyle = "#3a3a35";
+        for (let a = 0; a < this.archBary.length / 4; a++) {
+          const ap = archPos[this.data.archetypes[a].name];
+          star(ctx, sx(ap[0]), sy(ap[1]), 8);
+          ctx.font = "600 11px system-ui, sans-serif";
+          ctx.fillText(this.data.archetypes[a].name, sx(ap[0]), sy(ap[1]) - 12);
+        }
       }
       this.drawFocusMarks(ctx);
 

@@ -430,7 +430,10 @@ main {
 
 #status { color: var(--muted); }
 
-#nbtoggle {
+/* display toggles (neighbourhood, archetypes, centroids) */
+.toggles { display: flex; flex-direction: column; gap: 6px; }
+
+.toggle {
   display: flex;
   align-items: center;
   gap: 9px;
@@ -446,7 +449,7 @@ main {
   text-align: left;
 }
 
-#nbtoggle .sw {
+.toggle .sw {
   position: relative;
   flex-shrink: 0;
   width: 30px;
@@ -456,7 +459,7 @@ main {
   transition: background 0.15s;
 }
 
-#nbtoggle .sw::after {
+.toggle .sw::after {
   content: "";
   position: absolute;
   top: 2px;
@@ -469,14 +472,14 @@ main {
   transition: transform 0.15s;
 }
 
-#nbtoggle[aria-pressed="true"] {
+.toggle[aria-pressed="true"] {
   color: var(--fg);
   border-color: #cfd8e3;
   background: #eef3f8;
 }
 
-#nbtoggle[aria-pressed="true"] .sw { background: var(--accent); }
-#nbtoggle[aria-pressed="true"] .sw::after { transform: translateX(12px); }
+.toggle[aria-pressed="true"] .sw { background: var(--accent); }
+.toggle[aria-pressed="true"] .sw::after { transform: translateX(12px); }
 
 #tooltip {
   display: none;
@@ -909,7 +912,7 @@ main {
   #searchclear { width: 30px; height: 30px; font-size: 18px; }
 
   .fam { padding: 10px 10px; }
-  #nbtoggle { padding: 10px 12px; }
+  .toggle { padding: 10px 12px; }
 
   .rcomp { padding: 5px 9px; }
   .rcomp.add { padding: 5px 14px; }

@@ -80,10 +80,20 @@
         </section>
         <section class="psec">
           <div class="phead">display</div>
-          <button id="nbtoggle" type="button" aria-pressed="true"
-            title="highlight the selected recipe's neighbourhood (dish and links)">
-            <span class="sw" aria-hidden="true"></span>neighbourhood
-          </button>
+          <div class="toggles">
+            <button id="nbtoggle" class="toggle" type="button" aria-pressed="true"
+              title="highlight the selected recipe's neighbourhood (dish and links)">
+              <span class="sw" aria-hidden="true"></span>neighbourhood
+            </button>
+            <button id="atoggle" class="toggle" type="button" aria-pressed="true"
+              title="show the book archetype stars">
+              <span class="sw" aria-hidden="true"></span>&#9733; archetypes
+            </button>
+            <button id="ctoggle" class="toggle" type="button" aria-pressed="true"
+              title="show the class-mean diamonds">
+              <span class="sw" aria-hidden="true"></span>&#9670; centroids
+            </button>
+          </div>
         </section>
       </aside>
     </main>

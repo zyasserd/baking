@@ -20,6 +20,8 @@
     focus: null,
     classFilter: [],
     showNeighbourhood: true,
+    showArchetypes: true,
+    showCentroids: true,
   });
 
   const plotCtl = AID.attachPlot(
@@ -37,12 +39,24 @@
 
   const panelCtl = AID.attachPanel(document.getElementById("recipe"), store, data);
 
-  const nbBtn = document.getElementById("nbtoggle");
-  nbBtn.setAttribute("aria-pressed", String(store.get().showNeighbourhood));
-  nbBtn.addEventListener("click", () => {
-    const on = !store.get().showNeighbourhood;
-    store.set({ showNeighbourhood: on });
-    nbBtn.setAttribute("aria-pressed", String(on));
+  // Display toggles. Turning a marker layer off also clears a focus on it, so
+  // the plot never keeps "highlighting" something it no longer draws.
+  [
+    ["nbtoggle", "showNeighbourhood", null],
+    ["atoggle", "showArchetypes", "archetype"],
+    ["ctoggle", "showCentroids", "class"],
+  ].forEach(([id, key, kind]) => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.setAttribute("aria-pressed", String(store.get()[key]));
+    btn.addEventListener("click", () => {
+      const on = !store.get()[key];
+      const patch = { [key]: on };
+      const f = store.get().focus;
+      if (!on && kind && f && f.kind === kind) patch.focus = null;
+      store.set(patch);
+      btn.setAttribute("aria-pressed", String(on));
+    });
   });
 
   // The painter owns the screen-space neighbourhood (it depends on the current
