@@ -131,6 +131,16 @@ sandbox — no raw corpora, no network. The output is byte-identical to the
 local `scripts/analyze.py` run above. CI publishes it to GitHub Pages
 (`.github/workflows/pages.yml`).
 
+## Using the Aid
+
+The Aid is a browser, not a report. Search matches ingredients, baking
+families, recipe names and ratio conditions (`flour : fat = 2 : 1`); drag the
+divider bar to refold the simplex; click a point for its ratio card. Every view
+is encoded in the URL — partition, selection, search and the display toggles —
+so links are shareable and Back/Forward step through them, and the ratio card's
+clipboard icon copies the simplified ratio (`flour : fat : sugar : liquid : egg`)
+as text.
+
 ## Tests
 
 ```bash
@@ -142,9 +152,9 @@ unit conversion, decomposition rules, the tag taxonomy, the dataset contract,
 the Aid builder (data compilation + byte-deterministic packing), the
 compositional transforms (closure/CLR/ILR geometry), the ILR isometry
 (Aitchison distances preserved), and outlier-gate determinism. The Aid's
-DOM-free JS (geometry, partitions, search, panel helpers) runs under qjs via
-`tests/test_web.js`; the DOM code is syntax-checked there and exercised in
-the browser.
+DOM-free JS (geometry, partitions, search, panel helpers, deep-link encoding)
+runs under qjs via `tests/test_web.js`; the DOM code is syntax-checked there and
+exercised in the browser.
 
 Two consecutive stage-2 runs produce a byte-identical `bakers_aid.html` —
 the product is as deterministic as the dataset.
