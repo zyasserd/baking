@@ -72,9 +72,13 @@
     const caches = {};
     function buildCache(key, groups) {
       if (!caches[key]) {
+        // displace() folds overlap separation into the bary coords, so every
+        // downstream step (projection, morph, hit grid) is consistent.
+        const bary = AID.displace(
+          AID.bary(data.recipes.P, groups), data.meta.n, groups.length);
         caches[key] = {          key, groups,
           dim: AID.dimOf(groups),
-          bary: AID.bary(data.recipes.P, groups),
+          bary,
           colors: data.recipes.cls.map(c => AID.colorOf(c)),
           frame: new Float32Array(data.meta.n * 2),
           frameLocked: false,
@@ -379,7 +383,11 @@
         return;
       }
       if (e.pointerType === "mouse") {
-        const idx = painter ? painter.hit(mx, my) : -1;
+        let idx = painter ? painter.hit(mx, my) : -1;
+        // In selected mode only highlighted points are interactive: a dim point
+        // gets no hover ring and no tooltip either.
+        if (idx >= 0 && painter.selectedMode && painter.selectedMode()
+            && !painter.isHighlighted(idx)) idx = -1;
         const overMerge = painter && painter.mergeHit && painter.mergeHit(mx, my);
         canvas.style.cursor = overMerge ? "pointer" : "";
         if (idx !== hover) {
@@ -413,8 +421,9 @@
             markDirty();
             return;
           }
-          const idx = e.pointerType === "mouse" ? hover
-            : (painter ? painter.hit(mx, my) : -1);
+          // pick(), not hit(): in selected mode a click near a highlighted
+          // point snaps to it; a click on empty space clears the selection.
+          const idx = painter ? painter.pick(mx, my) : -1;
           store.set({ selection: idx >= 0 ? idx : -1 });
         }
         if (painter) painter.hover = -1;

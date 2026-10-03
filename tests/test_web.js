@@ -75,6 +75,54 @@ ok(AID.vertexName(0) === "A" && AID.vertexName(3) === "D", "vertex letters A-D")
   close(cb3[3], 0.125, 1e-6, "canon3 sugar slot");
 }
 
+/* ── geo: overlap separation (displace) ──────────────────────────────── */
+{
+  const raw = new Float32Array([
+    0.2, 0.3, 0.5,
+    0.2, 0.3, 0.5,
+    0.5, 0.25, 0.25,
+  ]);
+  const d = AID.displace(raw, 3, 3);
+  // unique point untouched
+  ok(d[6] === raw[6] && d[7] === raw[7] && d[8] === raw[8],
+    "unique point stays exactly on its ratio");
+  // coincident pair now differs
+  const sep = Math.hypot(d[0] - d[3], d[1] - d[4], d[2] - d[5]);
+  ok(sep > 0, "coincident points separate");
+  // deterministic: same input -> byte-identical output
+  const d2 = AID.displace(raw, 3, 3);
+  let same = true;
+  for (let i = 0; i < d.length; i++) if (d[i] !== d2[i]) same = false;
+  ok(same, "displacement is deterministic");
+  // every displaced point stays on the simplex
+  for (let i = 0; i < 3; i++) {
+    const s = d[i * 3] + d[i * 3 + 1] + d[i * 3 + 2];
+    ok(d[i * 3] >= 0 && d[i * 3 + 1] >= 0 && d[i * 3 + 2] >= 0 && Math.abs(s - 1) < 1e-6,
+      "displaced point " + i + " stays inside the simplex");
+  }
+  // a pile sitting on a vertex cannot be pushed off it
+  const vert = new Float32Array(12);
+  for (let i = 0; i < 4; i++) { vert[i * 3] = 1; }
+  const vd = AID.displace(vert, 4, 3);
+  for (let i = 0; i < 4; i++) {
+    const s = vd[i * 3] + vd[i * 3 + 1] + vd[i * 3 + 2];
+    ok(vd[i * 3] >= 0 && vd[i * 3 + 1] >= 0 && vd[i * 3 + 2] >= 0 && Math.abs(s - 1) < 1e-6,
+      "vertex pile stays on the simplex");
+  }
+  // conservative: a big pile stays within one fixed radius (no growing blobs)
+  const pile = new Float32Array(50 * 3);
+  for (let i = 0; i < 50; i++) { pile[i * 3] = 0.2; pile[i * 3 + 1] = 0.3; pile[i * 3 + 2] = 0.5; }
+  const pd = AID.displace(pile, 50, 3);
+  const o = [0, 0], q = [0, 0];
+  AID.project2(pile.subarray(0, 3), o);
+  let maxd = 0;
+  for (let i = 0; i < 50; i++) {
+    AID.project2(pd.subarray(i * 3, i * 3 + 3), q);
+    maxd = Math.max(maxd, Math.hypot(q[0] - o[0], q[1] - o[1]));
+  }
+  ok(maxd <= AID.DISPLACE_SPREAD + 1e-6, "spread stays within a fixed radius");
+}
+
 /* ── geo: projections ────────────────────────────────────────────────── */
 {
   const out = [0, 0];
@@ -420,6 +468,66 @@ std.loadScript("web/app/views.js");
       ok(p.nb && p.nb.count >= 1, label + " reports a data-space neighbourhood");
     } catch (e) { err = e; }
     ok(!err, label + " painter executes" + (err ? ": " + err : ""));
+  }
+
+  // selected mode: a search (or a selection with its neighbourhood) highlights
+  // a subset, so a click within a small radius snaps onto a highlighted point
+  // while a distant click is empty and deselects.
+  for (const [label, dim, name] of [["1D", 1, "rich"], ["2D", 2, "canon2"], ["3D", 3, "canon3"]]) {
+    const matches = new Uint8Array(vn);
+    matches[3] = 1;
+    const st = AID.createStore({ selection: -1, matches, showNeighbourhood: false });
+    const p = AID["view" + dim](cacheFor(AID.resolveGroups(name)), vdata, st);
+    p.reset(800, 600);
+    p.draw(stubCtx, 800, 600);
+    ok(p.selectedMode(), label + " a search defines selected mode");
+    ok(p.pick(10000, 10000) === -1, label + " a distant click deselects");
+    st.set({ matches: null });
+    ok(p.pick(10000, 10000) === -1, label + " pick is empty with no search");
+  }
+
+  // near a highlighted point the click still snaps onto it (2D, 1D)
+  {
+    const matches = new Uint8Array(vn); matches[3] = 1;
+    const st = AID.createStore({ selection: -1, matches, showNeighbourhood: false });
+    const cache = cacheFor(AID.resolveGroups("canon2"));
+    const p = AID.view2(cache, vdata, st);
+    p.reset(800, 600); p.draw(stubCtx, 800, 600);
+    const cx = cache.frame[6] * p.s + p.tx, cy = 600 - (cache.frame[7] * p.s + p.ty);
+    ok(p.pick(cx + 10, cy + 10) === 3, "2D click near a highlight snaps to it");
+  }
+  {
+    const matches = new Uint8Array(vn); matches[3] = 1;
+    const st = AID.createStore({ selection: -1, matches, showNeighbourhood: false });
+    const p = AID.view1(cacheFor(AID.resolveGroups("rich")), vdata, st);
+    p.reset(800, 600); p.draw(stubCtx, 800, 600);
+    ok(p.pick(p._xp[3] + 10, p._yp[3] + 10) === 3, "1D click near a highlight snaps to it");
+  }
+
+  // selected mode: a selection with its neighbourhood is also a highlight
+  {
+    const cache = cacheFor(AID.resolveGroups("canon2"));
+    const st = AID.createStore({ selection: 0, matches: null, showNeighbourhood: true });
+    const p = AID.view2(cache, vdata, st);
+    p.reset(800, 600);
+    p.draw(stubCtx, 800, 600);
+    ok(p.selectedMode(), "a selection with a neighbourhood is selected mode");
+    ok(p.isHighlighted(0), "the selected point is highlighted");
+    const cx = cache.frame[0] * p.s + p.tx, cy = 600 - (cache.frame[1] * p.s + p.ty);
+    const got = p.pick(cx + 9, cy + 9);
+    ok(got >= 0 && p.isHighlighted(got), "a nearby click snaps to a highlighted point");
+    ok(p.pick(10000, 10000) === -1, "a distant click deselects in selected mode");
+    // no click can ever select a non-highlighted point while in selected mode
+    for (let j = 0; j < vn; j++) {
+      const x = cache.frame[j * 2] * p.s + p.tx;
+      const y = 600 - (cache.frame[j * 2 + 1] * p.s + p.ty);
+      const hit = p.pick(x, y);
+      ok(hit === -1 || p.isHighlighted(hit),
+        "pick never returns a non-highlighted point in selected mode");
+    }
+    st.set({ showNeighbourhood: false });
+    p.draw(stubCtx, 800, 600);
+    ok(!p.selectedMode(), "a selection without a neighbourhood is not selected mode");
   }
 
   // the neighbourhood is optional: with it switched off no disc is reported

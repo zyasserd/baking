@@ -135,6 +135,64 @@
     return out;
   };
 
+  /* ── overlap separation ────────────────────────────────────────────────
+   * Recipes that share the displayed position render as dots on top of each
+   * other: their translucency stacks and zoom cannot tell them apart.
+   * displace() returns a copy of the barycentric coordinates in which such
+   * points are nudged onto a small deterministic golden-angle spiral around the
+   * true spot, so they can be told apart once zoomed in. The nudge is tiny and
+   * of fixed size (it never grows with the pile), lives in barycentric space so
+   * it can never leave the simplex (the step is scaled back until every
+   * coordinate is >= 0, and the deltas sum to zero), and is fully deterministic
+   * — the angle is the point's position in its collision group, never a random
+   * source. Points with no collision are returned exactly where the data puts
+   * them. */
+  AID.DISPLACE_QUANTUM = 1e-4; // displayed positions closer than this collide
+  AID.DISPLACE_SPREAD = 0.0015; // fixed spiral radius, frame units
+  const GOLDEN_ANGLE = 2.399963229728653;
+
+  AID.displace = function (bary, n, k) {
+    const out = Float32Array.from(bary);
+    if (k < 3) return out; // the axis view already strips points vertically
+    const groups = new Map();
+    for (let i = 0; i < n; i++) {
+      let key = "";
+      for (let g = 0; g < k; g++) {
+        key += Math.round(bary[i * k + g] / AID.DISPLACE_QUANTUM) + ",";
+      }
+      const a = groups.get(key);
+      if (a) a.push(i); else groups.set(key, [i]);
+    }
+    // Map a desired frame-space offset to a sum-zero bary delta through slots
+    // 0,1,2 (the base triangle, shared by the 2D and 3D frames), so the spiral
+    // stays circular instead of shearing with the triangle's 120° corners.
+    const v0x = AID.TRI2[0][0] - AID.TRI2[2][0];
+    const v0y = AID.TRI2[0][1] - AID.TRI2[2][1];
+    const v1x = AID.TRI2[1][0] - AID.TRI2[2][0];
+    const v1y = AID.TRI2[1][1] - AID.TRI2[2][1];
+    const det = v0x * v1y - v1x * v0y;
+    const d = new Float32Array(k); // one reusable sum-zero displacement
+    for (const a of groups.values()) {
+      const m = a.length;
+      if (m < 2) continue;
+      for (let j = 0; j < m; j++) {
+        const ang = j * GOLDEN_ANGLE;
+        const rr = AID.DISPLACE_SPREAD * Math.sqrt((j + 0.5) / m);
+        const dx = Math.cos(ang) * rr, dy = Math.sin(ang) * rr;
+        d.fill(0);
+        d[0] = (v1y * dx - v1x * dy) / det;
+        d[1] = (-v0y * dx + v0x * dy) / det;
+        d[2] = -(d[0] + d[1]);
+        const o = a[j] * k;
+        // largest safe step toward the offset before hitting a simplex face
+        let t = 1;
+        for (let g = 0; g < k; g++) if (d[g] < 0) t = Math.min(t, bary[o + g] / -d[g]);
+        for (let g = 0; g < k; g++) out[o + g] = bary[o + g] + t * d[g];
+      }
+    }
+    return out;
+  };
+
   /* 2D frame space: equilateral triangle, y up, flour at the top.
    * Vertex slots match group slots; slot 0 (flour) is the apex. */
   AID.TRI2 = [[0.5, 0.8660254], [0, 0], [1, 0]];

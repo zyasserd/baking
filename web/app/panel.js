@@ -80,7 +80,10 @@
         const intro = document.createElement("div");
         intro.className = "intro";
         intro.innerHTML =
-          "<p>Click a point for its ratios. Regroup the five parts in the " +
+          "<p>Click a point for its ratios. While anything is highlighted — a " +
+          "search, or a selection with its family and neighbourhood — a click " +
+          "near a highlighted point snaps to it; click empty space to clear. " +
+          "Regroup the five parts in the " +
           "ratio bar above the plot (drag a pill, or click it then a " +
           "compartment; click a divider or <code>+|</code> to change the " +
           "dimension). A fixed-radius " +

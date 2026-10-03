@@ -11,6 +11,9 @@
   const AID = (globalThis.AID = globalThis.AID || {});
 
   const PT_R = 2.2, HOVER_R = 6, SEL_R = 8;
+  /* How far (screen px) a click may land from a highlighted point and still
+   * snap onto it. Beyond this the click is treated as empty and deselects. */
+  const SNAP_R = 16;
 
   /* Dot opacity. Points are always translucent so overlaps *blend* (same-class
    * overlaps deepen toward the class colour, different classes mix) instead of
@@ -69,6 +72,24 @@
       /* A point is pickable only when no search/filter is active or when it
        * survives that filter: you can never open a recipe the query excluded. */
       matchActive: i => { const m = store.get().matches; return !m || !!m[i]; },
+      /* "Selected mode": something is highlighted, so clicks may only land on
+       * the highlighted points. That is a search/filter (matches), or a
+       * selection whose neighbourhood is drawn — the clicked recipe's family
+       * and its disc/band/ball. */
+      selectedMode: function () {
+        const st = store.get();
+        return !!st.matches || (st.selection >= 0 && !!this.nb);
+      },
+      /* Whether point i is one of the highlighted points (mirrors vis()). */
+      isHighlighted: function (i) {
+        const st = store.get();
+        const m = st.matches;
+        if (m && !m[i]) return false;
+        const nb = this.nb;
+        if (!nb) return true;
+        const sel = st.selection, cls = data.recipes.cls;
+        return (sel >= 0 && cls[i] === cls[sel]) || !!nb.mask[i];
+      },
       /* archetype frame coords for this partition */
       archBary: AID.bary(data.archetypes.map(a => a.P), cache.groups),
     };
@@ -531,6 +552,26 @@
       return best;
     };
 
+    /* Selection click. In selected mode only highlighted points are pickable:
+     * a direct hit counts only if it is highlighted; otherwise a click within
+     * SNAP_R snaps to the nearest highlighted point, and anything farther is
+     * empty and deselects. With nothing highlighted this is exactly hit(). */
+    p.pick = function (mx, my) {
+      const idx = this.hit(mx, my);
+      if (!this.selectedMode()) return idx;
+      if (idx >= 0 && this.isHighlighted(idx)) return idx;
+      const fx = (mx - this.tx) / this.s, fy = (H_ - my - this.ty) / this.s;
+      const r = SNAP_R / this.s, r2 = r * r;
+      let best = -1, bd = r2;
+      for (let i = 0; i < n; i++) {
+        if (!this.isHighlighted(i)) continue;
+        const dx = frame[i * 2] - fx, dy = frame[i * 2 + 1] - fy;
+        const d = dx * dx + dy * dy;
+        if (d < bd) { bd = d; best = i; }
+      }
+      return best;
+    };
+
     p.zoom = function (mx, my, f) {
       const fx = (mx - this.tx) / this.s, fy = (H_ - my - this.ty) / this.s;
       this.s *= f;
@@ -664,6 +705,7 @@
           yp[i] = yMid + jitter(i) * half * 0.5;
         }
       });
+      this._xp = xp; this._yp = yp; // kept for pick() below
       const sel = this.sel();
       const sameBase = sel >= 0 ? this.data.recipes.cls[sel] : null;
       const nb = this.store.get().showNeighbourhood
@@ -807,6 +849,24 @@
       }
       const tol = (X1 - X0) * HOVER_R / (plotR - plotL);
       return bd <= tol ? best : -1;
+    };
+
+    /* Selection click: in selected mode only highlighted points are pickable —
+     * a direct hit counts only if highlighted, else a bounded snap (see
+     * view2.pick). */
+    p.pick = function (mx, my) {
+      const idx = this.hit(mx, my);
+      if (!this.selectedMode()) return idx;
+      if (idx >= 0 && this.isHighlighted(idx)) return idx;
+      if (!this._xp) return -1;
+      let best = -1, bd = SNAP_R * SNAP_R;
+      for (let i = 0; i < n; i++) {
+        if (!this.isHighlighted(i)) continue;
+        const dx = this._xp[i] - mx, dy = this._yp[i] - my;
+        const d = dx * dx + dy * dy;
+        if (d < bd) { bd = d; best = i; }
+      }
+      return best;
     };
 
     p.zoom = function (mx, my, f) {
@@ -1115,6 +1175,23 @@
       let best = -1, bd = r2;
       for (let i = 0; i < n; i++) {
         if (!this.matchActive(i)) continue;
+        const dx = sx(screen[i * 2]) - mx, dy = sy(screen[i * 2 + 1]) - my;
+        const d = dx * dx + dy * dy;
+        if (d < bd) { bd = d; best = i; }
+      }
+      return best;
+    };
+
+    /* Selection click: in selected mode only highlighted points are pickable —
+     * a direct hit counts only if highlighted, else a bounded snap (see
+     * view2.pick). */
+    p.pick = function (mx, my) {
+      const idx = this.hit(mx, my);
+      if (!this.selectedMode()) return idx;
+      if (idx >= 0 && this.isHighlighted(idx)) return idx;
+      let best = -1, bd = SNAP_R * SNAP_R;
+      for (let i = 0; i < n; i++) {
+        if (!this.isHighlighted(i)) continue;
         const dx = sx(screen[i * 2]) - mx, dy = sy(screen[i * 2 + 1]) - my;
         const d = dx * dx + dy * dy;
         if (d < bd) { bd = d; best = i; }
