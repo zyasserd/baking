@@ -54,6 +54,23 @@
 
   AID.groupsKey = groups => groups.map(g => g.join("+")).join("|");
 
+  /* Inverse of groupsKey: "0|1+2|3+4" -> [[0],[1,2],[3,4]]. Returns null on
+   * anything malformed, so a hand-edited or truncated URL fragment can be
+   * ignored rather than throwing. Used to restore an arbitrary partition
+   * (including drag-built ones with no preset name) from the deep link. */
+  AID.parseGroupsKey = function (key) {
+    if (typeof key !== "string" || !key) return null;
+    const groups = [];
+    for (const comp of key.split("|")) {
+      const parts = comp.split("+").map(s => (s === "" ? NaN : Number(s)));
+      if (!parts.length || parts.some(n => !Number.isInteger(n) || n < 0 || n > 4)) {
+        return null;
+      }
+      groups.push(parts);
+    }
+    return groups.length ? groups : null;
+  };
+
   /* Parts not currently shown in any group. */
   AID.hiddenParts = function (groups) {
     const shown = new Set(groups.flat());

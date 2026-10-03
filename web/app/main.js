@@ -40,26 +40,38 @@
   const panelCtl = AID.attachPanel(document.getElementById("recipe"), store, data);
 
   // Display toggles. Turning a marker layer off also clears a focus on it, so
-  // the plot never keeps "highlighting" something it no longer draws.
-  [
+  // the plot never keeps "highlighting" something it no longer draws. The
+  // buttons mirror the store (syncToggles), so a restored deep link updates
+  // them too.
+  const toggles = [
     ["nbtoggle", "showNeighbourhood", null],
     ["atoggle", "showArchetypes", "archetype"],
     ["ctoggle", "showCentroids", "class"],
-  ].forEach(([id, key, kind]) => {
+  ];
+  function syncToggles() {
+    for (const [id, key] of toggles) {
+      const btn = document.getElementById(id);
+      if (btn) btn.setAttribute("aria-pressed", String(store.get()[key]));
+    }
+  }
+  toggles.forEach(([id, key, kind]) => {
     const btn = document.getElementById(id);
     if (!btn) return;
-    btn.setAttribute("aria-pressed", String(store.get()[key]));
     btn.addEventListener("click", () => {
       const on = !store.get()[key];
       const patch = { [key]: on };
       const f = store.get().focus;
       if (!on && kind && f && f.kind === kind) patch.focus = null;
       store.set(patch);
-      btn.setAttribute("aria-pressed", String(on));
     });
   });
+  store.subscribe(syncToggles);
+  syncToggles();
 
   // The painter owns the screen-space neighbourhood (it depends on the current
   // projection); the plot forwards it here to feed the ratio card's donut.
   AID.onNeighbourhood = nb => panelCtl.setNeighbourhood(nb);
+
+  // Deep links (last: it reads every control above and may restore state).
+  AID.attachUrl(store, data, { search: searchCtl, syncToggles });
 })();

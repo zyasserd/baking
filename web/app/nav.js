@@ -44,6 +44,13 @@
     return which === "about" ? about : (which === "home" ? home : app);
   }
 
+  /* The view named by a hash, ignoring any app-state query (e.g. "#app?p=…"). */
+  function viewToken(hash) {
+    if (AID.hashView) return AID.hashView(hash);
+    const t = String(hash || "").replace(/^#/, "").split(/[?&]/)[0].toLowerCase();
+    return t === "app" ? "app" : (t === "about" ? "about" : "home");
+  }
+
   function switchTo(next, which) {
     if (next === active) { setNav(which); return; }
     const prev = active;
@@ -69,21 +76,21 @@
       e.preventDefault();
       const which = a.getAttribute("data-nav");
       switchTo(viewFor(which), which);
+      // A real hash assignment pushes history, so Back returns to the view you
+      // came from. For "app" the current app state (partition, selection,
+      // search…) is folded in, so leaving and returning does not lose it.
       try {
-        if (history.replaceState) {
-          history.replaceState(null, "", which === "home" ? "#" : "#" + which);
-        }
+        location.hash = AID.hashFor
+          ? AID.hashFor(which)
+          : (which === "home" ? "#" : "#" + which);
       } catch (err) { /* file:// without history: views still switch */ }
     });
   });
 
   window.addEventListener("hashchange", () => {
-    if (location.hash === "#about") switchTo(about, "about");
-    else if (location.hash === "#app") switchTo(app, "app");
-    else if (location.hash === "#home") switchTo(home, "home");
+    const which = viewToken(location.hash);
+    switchTo(viewFor(which), which);
   });
 
-  if (location.hash === "#about") switchTo(about, "about");
-  else if (location.hash === "#app") switchTo(app, "app");
-  else switchTo(home, "home");
+  switchTo(viewFor(viewToken(location.hash)), viewToken(location.hash));
 })();

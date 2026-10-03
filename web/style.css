@@ -659,6 +659,29 @@ main {
   white-space: nowrap;
 }
 
+.readoutrow { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
+.readoutrow .readout { margin-bottom: 0; }
+
+.copybtn {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  border-radius: 6px;
+  padding: 0;
+  cursor: pointer;
+}
+
+.copybtn svg { display: block; }
+.copybtn:hover { color: var(--fg); background: #f0f0ea; }
+.copybtn.ok { color: #2e7d32; border-color: #2e7d32; }
+
 .readout {
   font: 600 22px/1.2 ui-monospace, "SF Mono", Menlo, monospace;
   letter-spacing: 0.02em;

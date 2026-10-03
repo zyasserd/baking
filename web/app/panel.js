@@ -78,6 +78,91 @@
       return wrap;
     }
 
+    /* A small clipboard icon (and a check shown briefly after copying). */
+    const ICON_COPY =
+      '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" ' +
+      'fill="none" stroke="currentColor" stroke-width="1.4" ' +
+      'stroke-linecap="round" stroke-linejoin="round">' +
+      '<rect x="5" y="5" width="8" height="9" rx="1.5"/>' +
+      '<path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-5A1.5 1.5 0 0 0 3 3.5v6A1.5 1.5 0 0 0 4.5 11H5"/></svg>';
+    const ICON_CHECK =
+      '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" ' +
+      'fill="none" stroke="currentColor" stroke-width="1.8" ' +
+      'stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M3.5 8.5 6.5 11.5 12.5 4.5"/></svg>';
+
+    /* Copy text to the clipboard, flashing the button to a check. clipboard API
+     * first (https/localhost), execCommand as the file:// fallback. */
+    function copyRatio(text, btn) {
+      const done = () => {
+        btn.innerHTML = ICON_CHECK;
+        btn.classList.add("ok");
+        window.setTimeout(() => {
+          btn.innerHTML = ICON_COPY;
+          btn.classList.remove("ok");
+        }, 1200);
+      };
+      const fallback = () => {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.setAttribute("readonly", "");
+        ta.style.position = "fixed";
+        ta.style.top = "-1000px";
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand("copy"); } catch (e) { /* ignore */ }
+        document.body.removeChild(ta);
+        done();
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, fallback);
+      } else {
+        fallback();
+      }
+    }
+
+    function copyButton(text) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "copybtn";
+      b.title = "copy this ratio";
+      b.setAttribute("aria-label", "copy this ratio");
+      b.innerHTML = ICON_COPY;
+      b.addEventListener("click", e => { e.stopPropagation(); copyRatio(text, b); });
+      return b;
+    }
+
+    /* The copied note. A "Title :: family" head line, then the part order once,
+     * then aligned label/value rows (justified under the order line). */
+    const PART_ORDER_LINE = "flour : fat : sugar : liquid : egg";
+    const copyRow = (label, value) =>
+      "  " + (label + "        ").slice(0, 8) + " " + value;
+
+    function recipeRatioText(sel) {
+      const r = data.recipes;
+      const P = r.P[sel];
+      const ratio = AID.simpleRatio(P);
+      return [
+        r.name[sel] + " :: " + r.cls[sel],
+        PART_ORDER_LINE,
+        copyRow("ratio", ratio ? AID.formatRatio(ratio) : "\u2014"),
+        copyRow("per 100", AID.readout(P)),
+        copyRow("source", r.url[sel]),
+      ].join("\n");
+    }
+
+    function markerRatioText(focus, P, ratio) {
+      const fam = focus.kind === "class"
+        ? focus.id : (AID.ARCHETYPE_FAMILY[focus.id] || null);
+      return [
+        (focus.kind === "archetype" ? "\u2605 " : "\u25c6 ") + focus.id +
+          " :: " + (fam || "\u2014"),
+        PART_ORDER_LINE,
+        copyRow("ratio", ratio ? AID.formatRatio(ratio) : "\u2014"),
+        copyRow("per 100", AID.readout(P)),
+      ].join("\n");
+    }
+
     function appendComposition(P) {
       const bar = document.createElement("div");
       bar.className = "compbar";
@@ -105,16 +190,21 @@
       panel.appendChild(legend);
     }
 
-    /* The closest simple ratio (small integers), above the per-100 readout. */
-    function appendSimpleRatio(P, eps) {
+    /* The closest simple ratio (small integers), with an icon to copy the
+     * whole note, above the per-100 readout. */
+    function appendSimpleRatio(P, eps, copyText) {
       const sr = AID.simpleRatio(P, eps);
+      const row = document.createElement("div");
+      row.className = "readoutrow";
       const ro = document.createElement("div");
       ro.className = "readout";
       ro.textContent = sr ? AID.formatRatio(sr) : "\u2014";
+      row.appendChild(ro);
+      if (copyText != null) row.appendChild(copyButton(copyText));
       const lab = document.createElement("div");
       lab.className = "readoutlabel";
       lab.textContent = "closest simple ratio (flour:fat:sugar:liquid:egg)";
-      panel.appendChild(ro);
+      panel.appendChild(row);
       panel.appendChild(lab);
     }
 
@@ -146,8 +236,11 @@
       tag.textContent = focus.kind === "class" ? "class mean" : "archetype";
       head.appendChild(tag);
       panel.appendChild(head);
+      const ratio = P ? (focus.kind === "archetype"
+        ? AID.archetypeRatio(P) : AID.simpleRatio(P)) : null;
       if (P) {
-        appendSimpleRatio(P, focus.kind === "archetype" ? 1e-5 : undefined);
+        appendSimpleRatio(P, focus.kind === "archetype" ? 1e-5 : undefined,
+          markerRatioText(focus, P, ratio));
         appendPer100(P);
         appendComposition(P);
       }
@@ -208,7 +301,7 @@
       panel.appendChild(head);
 
       const P = r.P[sel];
-      appendSimpleRatio(P);
+      appendSimpleRatio(P, undefined, recipeRatioText(sel));
       appendPer100(P);
       appendComposition(P);
 

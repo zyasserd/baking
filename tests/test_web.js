@@ -23,6 +23,7 @@ std.loadScript("web/app/palette.js");
 std.loadScript("web/app/state.js");
 std.loadScript("web/app/geo.js");
 std.loadScript("web/app/search.js");
+std.loadScript("web/app/deeplink.js");
 
 /* ── palette ─────────────────────────────────────────────────────────── */
 ok(AID.colorOf("cookie") === "#e15759", "palette cookie");
@@ -693,8 +694,64 @@ std.loadScript("web/app/views.js");
   ok(!merr, "merge glyph draws" + (merr ? ": " + merr : ""));
 }
 
+/* ── deep link: hash <-> app state ───────────────────────────────────── */
+{
+  ok(AID.hashView("#app") === "app", "hashView app");
+  ok(AID.hashView("#app?p=0%7C1%2B2%7C3%2B4") === "app", "hashView app with params");
+  ok(AID.hashView("#about") === "about", "hashView about");
+  ok(AID.hashView("") === "home" && AID.hashView("#") === "home", "hashView home");
+
+  ok(AID.groupsKey(AID.parseGroupsKey("0|1+2|3+4")) === "0|1+2|3+4",
+    "groupsKey/parseGroupsKey round trip");
+  ok(AID.parseGroupsKey("0|1+2|") === null, "parseGroupsKey rejects a trailing empty group");
+  ok(AID.parseGroupsKey("nope") === null, "parseGroupsKey rejects non-numeric");
+
+  // everything at its default encodes to no params at all
+  const def = AID.parseAppHash("#app");
+  ok(AID.encodeAppState(def) === "", "default state encodes to empty params");
+  ok(def.selection === -1 && def.focus === null, "default decode has no selection/focus");
+  ok(def.showNeighbourhood && def.showArchetypes && def.showCentroids,
+    "default decode has the layers on");
+
+  const st = {
+    groups: [[0], [1], [2, 3, 4]],
+    selection: 7,
+    focus: { kind: "archetype", id: "pound cake" },
+    classFilter: ["cake", "quick_bread"],
+    search: {
+      t: [{ type: "ingredient", label: "flour", head: "flour" },
+          { type: "ratio", label: "fat", target: { label: "fat", idx: [3] }, min: 10, max: 40 }],
+      c: ["or"],
+      e: [{ type: "ratioeq", label: "flour : fat = 2 : 1",
+            ops: [{ idx: [0], label: "flour", k: 2 }, { idx: [3], label: "fat", k: 1 }] }],
+    },
+    showNeighbourhood: true,
+    showArchetypes: false,
+    showCentroids: true,
+  };
+  const params = AID.encodeAppState(st);
+  const back = AID.parseAppHash("#app?" + params);
+  ok(back, "non-default state decodes");
+  ok(AID.groupsKey(back.groups) === AID.groupsKey(st.groups), "groups round trip");
+  ok(back.selection === 7, "selection round trip");
+  ok(back.focus && back.focus.kind === "archetype" && back.focus.id === "pound cake",
+    "focus round trip");
+  ok(back.classFilter.join("|") === "cake|quick_bread", "classFilter round trip");
+  ok(back.search && back.search.t.length === 2 && back.search.t[1].min === 10,
+    "search tokens round trip");
+  ok(back.search.c[0] === "or", "search connectors round trip");
+  ok(back.search.e[0].ops[1].k === 1, "ratio overlay round trip");
+  ok(back.showArchetypes === false && back.showCentroids === true &&
+    back.showNeighbourhood === true, "display toggles round trip");
+
+  // a class focus uses "c:"; and malformed bits are ignored, not thrown
+  ok(AID.parseAppHash("#app?f=c%3Acake").focus.kind === "class", "class focus decodes");
+  ok(AID.parseAppHash("#app?q=not-json&s=abc&p=%7C").selection === -1,
+    "malformed params fall back to defaults");
+}
+
 /* ── syntax-parse the DOM modules (no execution under qjs) ───────────── */
-for (const f of ["web/app/views.js", "web/app/plot.js", "web/app/searchbar.js", "web/app/legend.js", "web/app/dividerbar.js", "web/app/panel.js", "web/app/nav.js", "web/app/about.js", "web/app/main.js"]) {
+for (const f of ["web/app/views.js", "web/app/plot.js", "web/app/searchbar.js", "web/app/legend.js", "web/app/dividerbar.js", "web/app/panel.js", "web/app/url.js", "web/app/nav.js", "web/app/about.js", "web/app/main.js"]) {
   let src;
   try {
     src = std.read_file(f);

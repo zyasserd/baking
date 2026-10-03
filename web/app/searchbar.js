@@ -311,6 +311,24 @@
     }
 
     renderChips();
-    return { rerun, clear };
+
+    /* Serialise / restore the query for the deep link. Tokens, connectors and
+     * ratio-equation overlays are all plain JSON-safe objects. */
+    function getState() {
+      return { t: tokens.slice(), c: conns.slice(), e: eqs.slice() };
+    }
+    function setState(st) {
+      tokens = st && st.t ? st.t.slice() : [];
+      conns = st && st.c ? st.c.slice() : [];
+      eqs = st && st.e ? st.e.slice() : [];
+      pending = null;
+      input.value = "";
+      suggestions = [];
+      hideDropdown();
+      renderChips();
+      rerun();
+    }
+
+    return { rerun, clear, getState, setState };
   };
 })();
