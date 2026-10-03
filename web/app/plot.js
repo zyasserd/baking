@@ -80,6 +80,8 @@
           dim: AID.dimOf(groups),
           bary,
           colors: data.recipes.cls.map(c => AID.colorOf(c)),
+          // pale ceiling colour for de-emphasised dots (see AID.dimColorOf)
+          dimColors: data.recipes.cls.map(c => AID.dimColorOf(c)),
           frame: new Float32Array(data.meta.n * 2),
           frameLocked: false,
           fade: 1, // painters scale point alpha by this (1D <-> 2D crossfade)

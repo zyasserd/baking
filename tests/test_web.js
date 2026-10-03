@@ -27,6 +27,15 @@ std.loadScript("web/app/search.js");
 /* ── palette ─────────────────────────────────────────────────────────── */
 ok(AID.colorOf("cookie") === "#e15759", "palette cookie");
 ok(AID.colorOf("unknown_class") === "#777777", "palette fallback");
+{
+  // de-emphasised colour is a paler tint of the class colour, so a dense pile
+  // of dim dots cannot stack back up to the saturated colour
+  const dim = AID.dimColorOf("cookie");
+  ok(dim !== AID.colorOf("cookie"), "dim colour differs from the class colour");
+  const ch = s => [1, 3, 5].map(i => parseInt(s.slice(i, i + 2), 16));
+  const [dr, dg, db] = ch(dim), [br, bg, bb] = ch("#e15759");
+  ok(dr > br && dg > bg && db > bb, "dim colour is lighter than the class colour");
+}
 ok(AID.vertexName(0) === "A" && AID.vertexName(3) === "D", "vertex letters A-D");
 
 /* ── store ───────────────────────────────────────────────────────────── */
@@ -433,6 +442,7 @@ std.loadScript("web/app/views.js");
     const c = {
       key: AID.groupsKey(groups), groups, dim, bary,
       colors: vcls.map(x => AID.colorOf(x)),
+      dimColors: vcls.map(x => AID.dimColorOf(x)),
       frame: new Float32Array(vn * 2), frameLocked: false,
       updateFrame(rot) {
         const tmp = [0, 0, 0];

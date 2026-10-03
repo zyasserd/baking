@@ -447,7 +447,9 @@
         if (i === sel) continue; // the selected dot is drawn on top, last
         const sameFam = sameBase !== null && clsArr[i] === sameBase;
         const v = vis(m, nb, i, sameFam);
-        ctx.fillStyle = this.cache.colors[i];
+        // a dimmed dot uses the pale colour so a dense pile stays subdued
+        ctx.fillStyle = (v.context && !v.active)
+          ? this.cache.dimColors[i] : this.cache.colors[i];
         ctx.globalAlpha = (v.context ? (v.active ? A_ACTIVE : A_DIM) : A_IDLE) * fade;
         ctx.beginPath();
         ctx.arc(this.sx(frame[i * 2]), this.sy(frame[i * 2 + 1]),
@@ -749,7 +751,9 @@
           if (i === sel) continue; // drawn on top, after every row
           const sameFam = sameBase !== null && clsArr[i] === sameBase;
           const v = vis(m, nb, i, sameFam);
-          ctx.fillStyle = AID.colorOf(c);
+          // a dimmed dot uses the pale colour so a dense pile stays subdued
+          ctx.fillStyle = (v.context && !v.active)
+            ? AID.dimColorOf(c) : AID.colorOf(c);
           ctx.globalAlpha = (v.context ? (v.active ? A_ACTIVE : A_DIM) : A_IDLE) * fade;
           ctx.beginPath();
           ctx.arc(xp[i], yp[i], v.active ? 1.8 : 1.3, 0, 6.2832);
@@ -1006,7 +1010,9 @@
         if (i === sel) continue; // the selected dot is drawn on top, last
         const sameFam = sameBase !== null && clsArr[i] === sameBase;
         const v = vis(m, nb, i, sameFam);
-        ctx.fillStyle = this.cache.colors[i];
+        // a dimmed dot uses the pale colour so a dense pile stays subdued
+        ctx.fillStyle = (v.context && !v.active)
+          ? this.cache.dimColors[i] : this.cache.colors[i];
         // same opacity and size as the 2D view: overlaps blend, depth is not
         // encoded in the dot (only the draw order and the camera give depth)
         ctx.globalAlpha = (v.context ? (v.active ? A_ACTIVE : A_DIM) : A_IDLE) * fade;

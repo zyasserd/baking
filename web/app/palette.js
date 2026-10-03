@@ -18,6 +18,27 @@
     return AID.palette[cls] || "#777777";
   };
 
+  /* De-emphasised dots (context when something else is highlighted). Drawn in
+   * the class colour, a dense pile of translucent dots still stacks to a solid,
+   * saturated blob that reads like a highlighted point — the cookie cluster is
+   * the worst case. Fading the colour toward the page background gives the pile
+   * a low ceiling: hundreds of overlaps top out at a pale tint, never at the
+   * full class colour, so a dimmed cluster cannot masquerade as highlighted. */
+  const DIM_MIX = 0.7;
+  const dimCache = {};
+  AID.dimColorOf = function (cls) {
+    const base = AID.colorOf(cls);
+    if (dimCache[base]) return dimCache[base];
+    const r = parseInt(base.slice(1, 3), 16);
+    const g = parseInt(base.slice(3, 5), 16);
+    const b = parseInt(base.slice(5, 7), 16);
+    const mix = v => Math.round(v + (255 - v) * DIM_MIX);
+    const hex = v => v.toString(16).padStart(2, "0");
+    const out = "#" + hex(mix(r)) + hex(mix(g)) + hex(mix(b));
+    dimCache[base] = out;
+    return out;
+  };
+
   /* Per-vertex colours, indexed by compartment slot; shared by the divider bar
    * and the canvas badges. */
   AID.VERTEX_COLORS = ["#4e79a7", "#f28e2b", "#59a14f", "#b07aa1", "#e15757"];
