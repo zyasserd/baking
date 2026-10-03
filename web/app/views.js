@@ -640,6 +640,8 @@
       // frame y is up, screen y is down: negate dy so content follows the cursor
       this.tx += dx; this.ty -= dy;
     };
+    /* Two-finger drag (touch): same pan as a one-finger drag, for consistency. */
+    p.pan = function (dx, dy) { this.tx += dx; this.ty -= dy; };
 
     p.dblclick = function () { this.reset(W_, H_); };
     p.value = idx => AID.readout(data.recipes.P[idx]);
@@ -681,7 +683,8 @@
 
     p.reset = function (W, H) {
       W_ = W; H_ = H;
-      plotL = 150; plotR = W - 24;
+      // narrow screens give the family labels less room so the axis stays usable
+      plotL = W < 520 ? 104 : 150; plotR = W - 24;
     };
 
     p.draw = function (ctx, W, H) {
@@ -1332,6 +1335,11 @@
       pitch = Math.max(-1.3, Math.min(1.3, pitch + dy * 0.01));
       cam.yaw = yaw; cam.pitch = pitch;
       p._lastMove = performance.now();
+    };
+    /* Two-finger drag (touch): pan without the ctrl modifier a keyboard offers. */
+    p.pan = function (dx, dy) {
+      cam.panx = (cam.panx || 0) + dx;
+      cam.pany = (cam.pany || 0) + dy;
     };
     p.dblclick = function () {
       yaw = 0; pitch = 0; zoom = 1;

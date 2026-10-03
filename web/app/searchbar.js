@@ -247,7 +247,9 @@
           c.textContent = s.count.toLocaleString();
           item.appendChild(c);
         }
-        item.addEventListener("mousedown", e => { e.preventDefault(); commit(s); });
+        // pointerdown (not mousedown) fires for touch too, before the input
+        // blurs and the dropdown is torn down
+        item.addEventListener("pointerdown", e => { e.preventDefault(); commit(s); });
         dropdown.appendChild(item);
       });
       dropdown.style.display = "block";

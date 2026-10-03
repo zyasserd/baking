@@ -13,6 +13,11 @@
   const PART_HUES = ["#b39168", "#c44e52", "#8172b2", "#5b9bd5", "#edc948"];
 
   AID.attachPanel = function (panel, store, data) {
+    // "tap" reads better on touch; the interaction is the same
+    const coarse = window.matchMedia
+      && window.matchMedia("(pointer: coarse)").matches;
+    const Click = coarse ? "Tap" : "Click";
+    const click = coarse ? "tap" : "click";
     /* Donut of the family composition of the neighbourhood. SVG so it scales
      * and needs no canvas context; a single-family neighbourhood degenerates
      * to a full ring (an SVG arc of 360° is empty). */
@@ -164,14 +169,14 @@
         const intro = document.createElement("div");
         intro.className = "intro";
         intro.innerHTML =
-          "<p>Click a point for its ratios. While anything is highlighted — a " +
-          "search, a selection with its family and neighbourhood, or a marker — " +
-          "a click near a highlighted point snaps to it; click empty space to " +
-          "clear. Click a \u2605 book archetype or a \u25c6 class centre to see " +
-          "its ratio. Regroup the five parts in the " +
-          "ratio bar above the plot (drag a pill, or click it then a " +
-          "compartment; click a divider or <code>+|</code> to change the " +
-          "dimension). A fixed-radius " +
+          "<p>" + Click + " a point for its ratios. While anything is " +
+          "highlighted — a search, a selection with its family and " +
+          "neighbourhood, or a marker — a " + click + " near a highlighted " +
+          "point snaps to it; " + click + " empty space to clear. " + Click +
+          " a \u2605 book archetype or a \u25c6 class centre to see its ratio. " +
+          "Regroup the five parts in the ratio bar above the plot (drag a pill, " +
+          "or " + click + " it then a compartment; " + click + " a divider or " +
+          "<code>+|</code> to change the dimension). A fixed-radius " +
           "neighbourhood (a band on the axis, a disc in the triangle, a ball " +
           "in the tetrahedron) marks nearby recipes, dotted lines point to the " +
           "nearest class and book ratio, and its family stays highlighted " +

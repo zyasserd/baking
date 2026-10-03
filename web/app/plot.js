@@ -15,7 +15,7 @@
     let dragging = false, moved = false, last = null;
     let cache = null;
     const pointers = new Map(); // active pointers (pinch support)
-    let pinchDist = 0, lastTap = 0, lastTapX = 0, lastTapY = 0;
+    let pinchDist = 0, pinchMid = null, lastTap = 0, lastTapX = 0, lastTapY = 0;
 
     function markDirty() {
       dirty = true;
@@ -361,6 +361,7 @@
       if (pointers.size === 2) {
         const pts = [...pointers.values()];
         pinchDist = Math.hypot(pts[0][0] - pts[1][0], pts[0][1] - pts[1][1]);
+        pinchMid = [(pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2];
         dragging = false;
         return;
       }
@@ -371,18 +372,25 @@
     canvas.addEventListener("pointermove", e => {
       if (pointers.has(e.pointerId)) pointers.set(e.pointerId, pos(e));
 
-      // two-finger pinch zooms about the midpoint
+      // two-finger gesture: pinch zooms about the midpoint, and the moving
+      // midpoint pans (the touch equivalent of ctrl+drag)
       if (pointers.size === 2) {
         const pts = [...pointers.values()];
         const d = Math.hypot(pts[0][0] - pts[1][0], pts[0][1] - pts[1][1]);
-        if (pinchDist > 0 && painter && painter.zoom && Math.abs(d - pinchDist) > 1) {
-          const mx = (pts[0][0] + pts[1][0]) / 2, my = (pts[0][1] + pts[1][1]) / 2;
-          painter.zoom(mx, my, d / pinchDist);
-          markDirty();
+        const mx = (pts[0][0] + pts[1][0]) / 2, my = (pts[0][1] + pts[1][1]) / 2;
+        if (pinchDist > 0) {
+          if (painter && painter.zoom && Math.abs(d - pinchDist) > 1) {
+            painter.zoom(mx, my, d / pinchDist);
+          }
+          if (pinchMid && painter && painter.pan) {
+            painter.pan(mx - pinchMid[0], my - pinchMid[1]);
+          }
         }
         pinchDist = d;
+        pinchMid = [mx, my];
         moved = true;
         hideTooltip();
+        markDirty();
         return;
       }
 
@@ -419,7 +427,7 @@
     function pointerUp(e) {
       if (!pointers.has(e.pointerId)) return;
       pointers.delete(e.pointerId);
-      if (pointers.size > 0) { pinchDist = 0; return; }
+      if (pointers.size > 0) { pinchDist = 0; pinchMid = null; return; }
       if (!dragging) return;
       dragging = false;
       const [mx, my] = pos(e);

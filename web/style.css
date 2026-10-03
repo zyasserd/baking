@@ -19,8 +19,15 @@ body {
   color: var(--fg);
   background: var(--bg);
   height: 100vh;
+  height: 100dvh; /* not behind mobile browser chrome */
   overflow: hidden;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
+
+/* Tapping controls should not wait on the double-tap-to-zoom delay. The canvas
+ * keeps its own touch-action (none) so plot gestures stay ours. */
+a, button, input, #searchrow, .rpill, .suggestion, .fam { touch-action: manipulation; }
 
 /* ── site nav (fixed over the view layers) ───────────────────────────── */
 #topnav {
@@ -845,4 +852,70 @@ main {
   .fsplit .fnode + .fnode { margin-top: 10px; }
   .flabel { width: 104px; }
   .fnum { width: 74px; }
+}
+
+/* ── phones: one vertical scroll, pinned search, a tall plot ─────────── */
+@media (max-width: 700px) {
+  /* The app scrolls as a single document (no nested panel scroll, which is
+   * fiddly to use with a thumb). The search bar pins under the site nav. */
+  #app { display: block; overflow-y: auto; overscroll-behavior-y: contain; }
+
+  #appbar {
+    position: sticky;
+    top: 0;
+    z-index: 12;
+    padding: 8px 12px;
+    background: rgba(250, 250, 247, 0.92);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line);
+  }
+
+  main { display: block; }
+  #stage { display: block; }
+
+  #plot { height: 60vh; height: 60dvh; min-height: 280px; }
+
+  #panel {
+    width: 100%;
+    max-height: none;
+    overflow: visible;
+    border-left: none;
+    border-top: 1px solid var(--line);
+    padding-bottom: calc(24px + env(safe-area-inset-bottom));
+  }
+
+  #recipe { overflow: visible; }
+
+  /* the typeahead floats over the plot while the search bar is pinned */
+  #dropdown { max-height: 60dvh; }
+
+  .readout { font-size: 20px; }
+  .pclabel { width: 96px; }
+
+  #hero { padding: 64px 20px; }
+  .scrollhint { bottom: 14px; }
+}
+
+/* landscape phones (short viewport): keep the landing usable */
+@media (max-height: 560px) {
+  #hero { overflow-y: auto; align-items: flex-start; padding-top: 76px; }
+}
+
+/* touch devices: comfortable hit areas and no iOS focus zoom */
+@media (pointer: coarse) {
+  #search { font-size: 16px; }
+
+  .navlinks a { padding: 9px 13px; }
+  #searchclear { width: 30px; height: 30px; font-size: 18px; }
+
+  .fam { padding: 10px 10px; }
+  #nbtoggle { padding: 10px 12px; }
+
+  .rcomp { padding: 5px 9px; }
+  .rcomp.add { padding: 5px 14px; }
+  .rpill { padding: 6px 12px; }
+  .rdivider, .rsplit { padding: 8px 10px; }
+  .conn { padding: 7px 5px; }
+  .chip button { padding: 4px 7px; }
+  .suggestion { padding: 11px 12px; }
 }
