@@ -119,16 +119,21 @@
     <p>Each card snaps the recipe's five shares to the nearest
       <b>simple whole-number ratio</b> — the Ruhlman-style reading, e.g.
       <code>3 : 2 : 1 : 0 : 0</code> (flour : fat : sugar : liquid : egg). The
-      search keeps only primitive ratios (no common divisor) and, among those
-      within <b>0.04</b> of the recipe on every part, returns the simplest one:
-      the smallest largest term, capped at 12. It is a reading aid, not part of
-      the geometry — distances, centroids and classes all use the full
-      shares.</p>
-    <p>Because the ratio may sit up to 0.04 off on any part, it prefers round
-      numbers over an exact match. About <b>2%</b> of the plotted recipes land
-      exactly on a small ratio and the rest are within tolerance; only
-      <b>9 of 28,858</b> (0.03%) have none inside the tolerance and fall back to
-      the closest ratio at the cap.</p>
+      search keeps only primitive ratios (no common divisor) and returns the
+      simplest one whose own shares stay <b>within 0.04 on every part</b> — that
+      is, no single part is more than four percentage points of the total mix
+      away from where the round ratio would put it. "Simplest" means the
+      smallest largest term, capped at 12. It is a reading aid, not part of the
+      geometry — distances, centroids and classes all use the full shares.</p>
+    <p>For example, the ratio <code>3 : 2 : 1 : 0 : 0</code> is shares of
+      <b>0.50 : 0.33 : 0.17 : 0 : 0</b>. A recipe at
+      <b>0.53 : 0.32 : 0.15 : 0 : 0</b> still snaps to it: the three non-zero
+      parts differ by 0.03, 0.013 and 0.017, all under 0.04, even though none
+      matches exactly. Because a ratio may sit that far off on any part, the Aid
+      prefers round numbers over an exact but uglier match. About <b>2%</b> of
+      the plotted recipes land exactly on a small ratio and the rest are within
+      tolerance; only <b>9 of 28,858</b> (0.03%) have none inside the tolerance
+      and fall back to the closest ratio at the cap.</p>
 
     <h2>Where the data comes from</h2>
     <p class="muted">Three independent corpora meet at exactly one place: the
