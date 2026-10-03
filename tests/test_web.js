@@ -416,6 +416,56 @@ ok(AID.vertexName(0) === "A" && AID.vertexName(3) === "D", "vertex letters A-D")
      "setBirthAt(null,0) leaves the regular orientation");
 }
 
+/* ── closest simple ratio (lattice search) ───────────────────────────── */
+{
+  const uniform = [0.2, 0.2, 0.2, 0.2, 0.2];
+  const r = AID.simpleRatio(uniform);
+  ok(r && r.max === 1 && r.ok, "uniform composition is 1:1:1:1:1");
+  ok(AID.formatRatio(r) === "1 : 1 : 1 : 1 : 1", "uniform formats to all ones");
+
+  // a messy composition still resolves to a small ratio inside eps
+  const messy = [0.31, 0.27, 0.12, 0.19, 0.11];
+  const rm = AID.simpleRatio(messy);
+  ok(rm && rm.ok && rm.max <= 6, "a messy composition resolves to a small ratio");
+
+  // an archetype's exact ratio is recovered with a near-zero epsilon, in
+  // display order (flour, fat, sugar, liquid, egg)
+  const rb = AID.archetypeRatio([0.625, 0.375, 0, 0, 0]);
+  ok(rb && rb.max === 5 && AID.formatRatio(rb) === "5 : 0 : 0 : 3 : 0",
+     "archetypeRatio keeps the exact 5:3 in display order");
+
+  // zero replacement leaves a vertexish point finite
+  ok(AID.simpleRatio([1, 0, 0, 0, 0]) !== null, "pure vertex has a ratio");
+}
+
+/* ── class means: CLR (geometric) vs arithmetic ──────────────────────── */
+{
+  const same = [0.5, 0.2, 0.1, 0.1, 0.1];
+  const g = AID.classMeanMap([same.slice(), same.slice()], ["x", "x"]).x;
+  close(g[0], 0.5, 1e-6, "class mean of identical rows is that row");
+  close(g.reduce((s, v) => s + v, 0), 1, 1e-9, "class mean sums to 1");
+
+  const P2 = [[0.6, 0.2, 0.1, 0.05, 0.05], [0.2, 0.2, 0.1, 0.25, 0.25]];
+  const g2 = AID.classMeanMap(P2, ["y", "y"]).y;
+  const a2 = [0, 1, 2, 3, 4].map(j => (P2[0][j] + P2[1][j]) / 2);
+  ok(Math.abs(g2[0] - a2[0]) > 1e-3, "geometric mean differs from arithmetic");
+}
+
+/* ── archetype -> family map and marker compositions ─────────────────── */
+{
+  ok(AID.ARCHETYPE_FAMILY.cookie === "cookie", "archetype family cookie");
+  ok(Object.values(AID.ARCHETYPE_FAMILY).every(c => !!AID.palette[c]),
+     "every archetype family is a real class");
+  const fake = {
+    recipes: { P: [[0.2, 0.2, 0.2, 0.2, 0.2]], cls: ["cake"] },
+    archetypes: [{ name: "bread", P: [0.5, 0.3, 0, 0, 0] }],
+  };
+  ok(AID.markerComposition(fake, { kind: "archetype", id: "bread" })[0] === 0.5,
+     "markerComposition reads an archetype");
+  ok(Math.abs(AID.markerComposition(fake, { kind: "class", id: "cake" })[0] - 0.2) < 1e-6,
+     "markerComposition reads a class mean");
+}
+
 /* ── views: painters execute without throwing (stub canvas) ──────────── */
 std.loadScript("web/app/views.js");
 {
@@ -538,6 +588,53 @@ std.loadScript("web/app/views.js");
     st.set({ showNeighbourhood: false });
     p.draw(stubCtx, 800, 600);
     ok(!p.selectedMode(), "a selection without a neighbourhood is not selected mode");
+  }
+
+  // a selected marker highlights its family (no neighbourhood) and is pickable
+  {
+    const st = AID.createStore({
+      selection: -1, matches: null, showNeighbourhood: true,
+      focus: { kind: "class", id: "cake" },
+    });
+    const cache = cacheFor(AID.resolveGroups("canon2"));
+    const p = AID.view2(cache, vdata, st);
+    p.reset(800, 600);
+    p.draw(stubCtx, 800, 600);
+    ok(p.selectedMode(), "a marker defines selected mode");
+    ok(p.isHighlighted(0) && p.isHighlighted(2) && !p.isHighlighted(1),
+       "a class marker highlights only that family");
+    ok(p.nb === null, "a marker draws no neighbourhood disc");
+    ok(p.markerAt && p.markerAt(10000, 10000) === null, "markerAt is null off-marker");
+    // a marker picked from its drawn position winks over the dots
+    let found = null;
+    for (const mk of p._markers) {
+      if (p.markerAt(mk.x, mk.y)) { found = p.markerAt(mk.x, mk.y); break; }
+    }
+    ok(found && (found.kind === "class" || found.kind === "archetype"),
+       "markerAt finds a drawn marker");
+
+    // archetype marker highlights its mapped family
+    st.set({ focus: { kind: "archetype", id: "bread" } });
+    p.draw(stubCtx, 800, 600);
+    ok(p.isHighlighted(4) && !p.isHighlighted(1),
+       "an archetype marker highlights its mapped family");
+  }
+
+  // regression: in the 2D simplex the archetype stars/labels must be projected
+  // to screen, not drawn at their raw frame coords (~0..1, i.e. the origin).
+  {
+    const seen = {};
+    const rec = Object.assign({}, stubCtx);
+    rec.fillText = (t, x, y) => { seen[t] = [x, y]; };
+    const p = AID.view2(cacheFor(AID.resolveGroups("canon2")), vdata, vstore);
+    p.reset(800, 600);
+    p.draw(rec, 800, 600);
+    for (const a of vdata.archetypes) {
+      const pos = seen[a.name];
+      ok(pos, "2D draws the archetype label " + a.name);
+      ok(pos && pos[0] > 20 && pos[0] < 780 && pos[1] > 20 && pos[1] < 580,
+        "2D archetype " + a.name + " label is inside the plot (screen space)");
+    }
   }
 
   // the neighbourhood is optional: with it switched off no disc is reported

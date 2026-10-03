@@ -139,6 +139,7 @@
         ratioEqs: eqs.slice(),
         matches: mask,
         matchCount: count,
+        focus: null,
       });
       countEl.textContent = (tokens.length || sel.length)
         ? count.toLocaleString() + " of " + data.meta.n.toLocaleString() + " recipes"

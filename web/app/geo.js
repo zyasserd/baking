@@ -341,6 +341,136 @@
     return s.join(" : ");
   };
 
+  /* ── closest simple integer ratio ────────────────────────────────────────
+   *
+   * A recipe is a point on the 5-part simplex; "3 : 2 : 1" is the primitive
+   * integer point nearest it. We want the *simplest* ratio still close enough:
+   * among all primitive integer vectors whose normalized position is within
+   * RATIO_EPS (max absolute component error) of the recipe, the one with the
+   * smallest largest term. Searching N = 1, 2, 3 … and returning the first N
+   * that has any candidate inside the ball gives exactly that min-max ratio.
+   *
+   * The simplex is 4-D, so ~N⁴ primitive ratios have max term ≤ N and their
+   * typical spacing is ~1/N: small integers and a tight epsilon trade off
+   * directly. On this dataset eps=0.05 resolves every recipe within max 10. */
+  AID.RATIO_EPS = 0.04;
+  AID.RATIO_MAX_TERM = 12;
+
+  function ratioGcd(a) {
+    let g = 0;
+    for (let i = 0; i < 5; i++) {
+      let v = a[i];
+      while (v) { const t = g % v; g = v; v = t; }
+    }
+    return g;
+  }
+
+  function ratioResult(terms, err, max, eps) {
+    return {
+      terms: AID.DISPLAY_ORDER.map(i => terms[i]), // display order, like readout
+      raw: terms,                                  // PART_NAMES order
+      err, max, ok: err <= eps,
+    };
+  }
+
+  /* `eps` is the max component error tolerated (default RATIO_EPS). Passing a
+   * near-zero eps recovers the exact primitive ratio of an already-simple
+   * composition, e.g. a book archetype — handy because 5:3 has a smaller
+   * 3:2 approximation that the default epsilon would otherwise prefer.
+   *
+   * The primitive integer ratios are the same for every query, so they are
+   * built once (lazily) into per-max-term groups and reused: a query only
+   * scans the groups in order and returns the first with a candidate inside
+   * the ball (min max term), or the closest if none is. */
+  let _lattice = null;
+  function buildLattice() {
+    const cap = AID.RATIO_MAX_TERM;
+    const gp = [], gt = [];
+    for (let i = 0; i <= cap; i++) { gp.push([]); gt.push([]); }
+    const a = [0, 0, 0, 0, 0];
+    for (a[0] = 0; a[0] <= cap; a[0]++)
+    for (a[1] = 0; a[1] <= cap; a[1]++)
+    for (a[2] = 0; a[2] <= cap; a[2]++)
+    for (a[3] = 0; a[3] <= cap; a[3]++)
+    for (a[4] = 0; a[4] <= cap; a[4]++) {
+      let m = a[0];
+      for (let i = 1; i < 5; i++) if (a[i] > m) m = a[i];
+      if (m === 0 || ratioGcd(a) !== 1) continue;
+      const s = a[0] + a[1] + a[2] + a[3] + a[4];
+      for (let i = 0; i < 5; i++) { gp[m].push(a[i] / s); gt[m].push(a[i]); }
+    }
+    const groups = [];
+    for (let N = 0; N <= cap; N++) {
+      groups.push({
+        pos: Float32Array.from(gp[N]),
+        terms: Int8Array.from(gt[N]),
+        count: gp[N].length / 5,
+      });
+    }
+    _lattice = { cap, groups };
+  }
+
+  AID.simpleRatio = function (row, eps) {
+    const tol = eps == null ? AID.RATIO_EPS : eps;
+    let sum = 0;
+    for (let i = 0; i < 5; i++) sum += row[i];
+    if (!(sum > 0)) return null;
+    const x = [0, 0, 0, 0, 0];
+    for (let i = 0; i < 5; i++) x[i] = row[i] / sum;
+    if (!_lattice) buildLattice();
+    const L = _lattice;
+    let best = null, bestErr = Infinity, bestMax = 0;
+    for (let N = 1; N <= L.cap; N++) {
+      const g = L.groups[N];
+      if (!g.count) continue;
+      const pos = g.pos, terms = g.terms;
+      let hit = null, hitErr = Infinity;
+      for (let c = 0; c < g.count; c++) {
+        const o = c * 5;
+        let e = 0;
+        for (let i = 0; i < 5; i++) {
+          let d = x[i] - pos[o + i];
+          if (d < 0) d = -d;
+          if (d > e) e = d;
+        }
+        if (e <= tol && e < hitErr) {
+          hit = [terms[o], terms[o + 1], terms[o + 2], terms[o + 3], terms[o + 4]];
+          hitErr = e;
+        }
+        if (e < bestErr) {
+          best = [terms[o], terms[o + 1], terms[o + 2], terms[o + 3], terms[o + 4]];
+          bestErr = e; bestMax = N;
+        }
+      }
+      if (hit) return ratioResult(hit, hitErr, N, tol);
+    }
+    return best ? ratioResult(best, bestErr, bestMax, tol) : null;
+  };
+
+  AID.formatRatio = function (r) {
+    return r ? r.terms.join(" : ") : "";
+  };
+
+  /* Exact small-integer ratio of an archetype composition (no approximation). */
+  AID.archetypeRatio = function (P) {
+    return AID.simpleRatio(P, 1e-5);
+  };
+
+  /* Display ratio for a marker: exact for a book archetype, approximate for a
+   * class mean. Memoized — the hover tooltip asks on every pointer move. */
+  let _markerRatio = null;
+  AID.markerRatio = function (data, mk) {
+    if (!_markerRatio || _markerRatio.data !== data) _markerRatio = { data, map: {} };
+    const key = mk.kind + ":" + mk.id;
+    if (key in _markerRatio.map) return _markerRatio.map[key];
+    const comp = AID.markerComposition(data, mk);
+    const r = comp
+      ? (mk.kind === "archetype" ? AID.archetypeRatio(comp) : AID.simpleRatio(comp))
+      : null;
+    _markerRatio.map[key] = r;
+    return r;
+  };
+
   /* ── Aitchison geometry: ILR (pivot balances) and nearest archetype ──
    *
    * Mirrors src/method/coda.py so distances agree with the method's numbers.
@@ -397,9 +527,8 @@
     return { name: best.name, d: bd };
   };
 
-  /* Per-class centroid = arithmetic mean of the class's share rows (the same
-   * point the plot's diamond marks). Memoized: the panel asks on every
-   * selection. */
+  /* Per-class centroid = arithmetic mean of the class's share rows. Kept for
+   * comparison; the compositional centre is the geometric mean below. */
   let _centroids = null;
   function classCentroidMap(P, cls) {
     if (_centroids && _centroids.P === P) return _centroids.map;
@@ -416,9 +545,65 @@
     return map;
   }
 
-  /* Nearest class centroid by Aitchison distance (Euclidean in ILR). */
+  /* Per-class centre in Aitchison geometry: the CLR mean,
+   * close(exp(mean(log(share)))), with the usual zero replacement. This is the
+   * composition the class is centred on — the arithmetic mean of raw shares is
+   * pulled toward whatever the class's spread is and is not the centre the
+   * Aitchison distances measure to. Memoized: the panel and every draw ask. */
+  let _cmeans = null;
+  AID.classMeanMap = function (P, cls) {
+    if (_cmeans && _cmeans.P === P) return _cmeans.map;
+    const acc = {}, cnt = {}, map = {};
+    for (let i = 0; i < P.length; i++) {
+      const c = cls[i];
+      let s = acc[c];
+      if (!s) { s = acc[c] = [0, 0, 0, 0, 0]; cnt[c] = 0; }
+      const z = replaceZeros(P[i]);
+      for (let j = 0; j < 5; j++) s[j] += Math.log(z[j]);
+      cnt[c]++;
+    }
+    for (const c in acc) {
+      const m = acc[c].map(v => Math.exp(v / cnt[c]));
+      const t = m[0] + m[1] + m[2] + m[3] + m[4];
+      map[c] = m.map(v => v / t);
+    }
+    _cmeans = { P, map };
+    return map;
+  };
+  AID.classMean = function (data, clsName) {
+    return AID.classMeanMap(data.recipes.P, data.recipes.cls)[clsName] || null;
+  };
+
+  /* Composition behind a marker: a class-mean diamond or an archetype star. */
+  AID.markerComposition = function (data, mk) {
+    if (!mk) return null;
+    if (mk.kind === "class") return AID.classMean(data, mk.id);
+    const a = data.archetypes.find(x => x.name === mk.id);
+    return a ? a.P : null;
+  };
+
+  /* Book archetype -> the tag family it stands for. Hand-picked, not derived:
+   * an archetype is a composition, not a class, so which family it "belongs"
+   * to is a judgement call (e.g. an American biscuit reads as a quick bread,
+   * shortbread as a cookie). Selecting a star highlights this family. */
+  AID.ARCHETYPE_FAMILY = {
+    bread: "bread",
+    quick_bread: "quick_bread",
+    pie_dough: "pie_pastry",
+    biscuit: "quick_bread",
+    cookie: "cookie",
+    shortbread: "cookie",
+    choux: "batter",
+    pancake: "batter",
+    crepe: "batter",
+    pound_cake: "cake",
+    angel_food: "cake",
+  };
+
+  /* Nearest class centroid by Aitchison distance (Euclidean in ILR). Uses the
+   * geometric (CLR) mean — the class's compositional centre. */
   AID.nearestCentroid = function (Prow, P, cls) {
-    const map = classCentroidMap(P, cls);
+    const map = AID.classMeanMap(P, cls);
     const z = ilrRow(replaceZeros(Prow), PSI5);
     let best = null, bd = Infinity;
     for (const c in map) {

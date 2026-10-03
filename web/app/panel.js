@@ -73,62 +73,7 @@
       return wrap;
     }
 
-    function render(sel) {
-      panel.textContent = "";
-      nbEl = null;
-      if (sel < 0 || sel >= data.meta.n) {
-        const intro = document.createElement("div");
-        intro.className = "intro";
-        intro.innerHTML =
-          "<p>Click a point for its ratios. While anything is highlighted — a " +
-          "search, or a selection with its family and neighbourhood — a click " +
-          "near a highlighted point snaps to it; click empty space to clear. " +
-          "Regroup the five parts in the " +
-          "ratio bar above the plot (drag a pill, or click it then a " +
-          "compartment; click a divider or <code>+|</code> to change the " +
-          "dimension). A fixed-radius " +
-          "neighbourhood (a band on the axis, a disc in the triangle, a ball " +
-          "in the tetrahedron) marks nearby recipes, dotted lines point to the " +
-          "nearest class and book ratio, and its family stays highlighted " +
-          "(toggle it in <b>display</b> below). In the " +
-          "tetrahedron, drag to orbit and Ctrl-drag to pan.</p>" +
-          "<p>Search, or pick families in the list below, to highlight recipes.</p>" +
-          "<p><b>" + data.meta.n.toLocaleString() + "</b> baking recipes, each " +
-          "reduced to five structural parts: " +
-          data.meta.partNames.join(", ") + ".</p>" +
-          "<p>★ = book archetypes (Ruhlman's <i>Ratio</i>).</p>";
-        panel.appendChild(intro);
-        return;
-      }
-
-      const r = data.recipes;
-      const head = document.createElement("div");
-      head.className = "cardhead";
-      const a = document.createElement("a");
-      a.href = r.url[sel];
-      a.target = "_blank";
-      a.rel = "noopener";
-      a.textContent = r.name[sel];
-      head.appendChild(a);
-      const cls = document.createElement("span");
-      cls.className = "classchip";
-      cls.style.background = AID.colorOf(r.cls[sel]);
-      cls.textContent = r.cls[sel];
-      head.appendChild(cls);
-      panel.appendChild(head);
-
-      const P = r.P[sel];
-
-      const ro = document.createElement("div");
-      ro.className = "readout";
-      ro.textContent = AID.readout(P);
-      const roLabel = document.createElement("div");
-      roLabel.className = "readoutlabel";
-      roLabel.textContent = "parts per 100 flour (flour:fat:sugar:liquid:egg)";
-      panel.appendChild(ro);
-      panel.appendChild(roLabel);
-
-      // composition bar
+    function appendComposition(P) {
       const bar = document.createElement("div");
       bar.className = "compbar";
       AID.DISPLAY_ORDER.forEach((di, pos) => {
@@ -153,6 +98,114 @@
         legend.appendChild(item);
       });
       panel.appendChild(legend);
+    }
+
+    /* The closest simple ratio (small integers), above the per-100 readout. */
+    function appendSimpleRatio(P, eps) {
+      const sr = AID.simpleRatio(P, eps);
+      const ro = document.createElement("div");
+      ro.className = "readout";
+      ro.textContent = sr ? AID.formatRatio(sr) : "\u2014";
+      const lab = document.createElement("div");
+      lab.className = "readoutlabel";
+      lab.textContent = "closest simple ratio (flour:fat:sugar:liquid:egg)";
+      panel.appendChild(ro);
+      panel.appendChild(lab);
+    }
+
+    function appendPer100(P) {
+      const ro = document.createElement("div");
+      ro.className = "readout";
+      ro.textContent = AID.readout(P);
+      const roLabel = document.createElement("div");
+      roLabel.className = "readoutlabel";
+      roLabel.textContent = "parts per 100 flour (flour:fat:sugar:liquid:egg)";
+      panel.appendChild(ro);
+      panel.appendChild(roLabel);
+    }
+
+    /* A selected marker (archetype star or class-mean diamond) is a ratio, not
+     * a recipe: show its composition and simple ratio. */
+    function renderMarker(focus) {
+      const P = AID.markerComposition(data, focus);
+      const head = document.createElement("div");
+      head.className = "cardhead";
+      const b = document.createElement("b");
+      b.textContent = (focus.kind === "archetype" ? "\u2605 " : "\u25c6 ") + focus.id;
+      head.appendChild(b);
+      const fam = focus.kind === "class"
+        ? focus.id : (AID.ARCHETYPE_FAMILY[focus.id] || null);
+      const tag = document.createElement("span");
+      tag.className = "classchip";
+      tag.style.background = AID.colorOf(fam);
+      tag.textContent = focus.kind === "class" ? "class mean" : "archetype";
+      head.appendChild(tag);
+      panel.appendChild(head);
+      if (P) {
+        appendSimpleRatio(P, focus.kind === "archetype" ? 1e-5 : undefined);
+        appendPer100(P);
+        appendComposition(P);
+      }
+      const info = document.createElement("div");
+      info.className = "arch";
+      info.appendChild(document.createTextNode(
+        focus.kind === "class" ? "class centre \u00b7 family: " : "family: "));
+      const bb = document.createElement("b");
+      bb.textContent = fam || "\u2014";
+      info.appendChild(bb);
+      panel.appendChild(info);
+    }
+
+    function render(sel, focus) {
+      panel.textContent = "";
+      nbEl = null;
+      if (focus) { renderMarker(focus); return; }
+      if (sel < 0 || sel >= data.meta.n) {
+        const intro = document.createElement("div");
+        intro.className = "intro";
+        intro.innerHTML =
+          "<p>Click a point for its ratios. While anything is highlighted — a " +
+          "search, a selection with its family and neighbourhood, or a marker — " +
+          "a click near a highlighted point snaps to it; click empty space to " +
+          "clear. Click a \u2605 book archetype or a \u25c6 class centre to see " +
+          "its ratio. Regroup the five parts in the " +
+          "ratio bar above the plot (drag a pill, or click it then a " +
+          "compartment; click a divider or <code>+|</code> to change the " +
+          "dimension). A fixed-radius " +
+          "neighbourhood (a band on the axis, a disc in the triangle, a ball " +
+          "in the tetrahedron) marks nearby recipes, dotted lines point to the " +
+          "nearest class and book ratio, and its family stays highlighted " +
+          "(toggle it in <b>display</b> below). In the " +
+          "tetrahedron, drag to orbit and Ctrl-drag to pan.</p>" +
+          "<p>Search, or pick families in the list below, to highlight recipes.</p>" +
+          "<p><b>" + data.meta.n.toLocaleString() + "</b> baking recipes, each " +
+          "reduced to five structural parts: " +
+          data.meta.partNames.join(", ") + ".</p>" +
+          "<p>\u2605 = book archetypes (Ruhlman's <i>Ratio</i>).</p>";
+        panel.appendChild(intro);
+        return;
+      }
+
+      const r = data.recipes;
+      const head = document.createElement("div");
+      head.className = "cardhead";
+      const a = document.createElement("a");
+      a.href = r.url[sel];
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.textContent = r.name[sel];
+      head.appendChild(a);
+      const cls = document.createElement("span");
+      cls.className = "classchip";
+      cls.style.background = AID.colorOf(r.cls[sel]);
+      cls.textContent = r.cls[sel];
+      head.appendChild(cls);
+      panel.appendChild(head);
+
+      const P = r.P[sel];
+      appendSimpleRatio(P);
+      appendPer100(P);
+      appendComposition(P);
 
       // nearest archetype and nearest class centroid
       const near = AID.aitchisonNearest(P, data.archetypes);
@@ -207,8 +260,8 @@
       fillNeighbourhood(nb);
     }
 
-    store.subscribe(st => render(st.selection));
-    render(-1);
+    store.subscribe(st => render(st.selection, st.focus));
+    render(-1, null);
     return { render, setNeighbourhood };
   };
 })();

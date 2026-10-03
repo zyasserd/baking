@@ -113,6 +113,21 @@
       where your query lives; click a point for its ratio card, its nearest book
       archetype, and its class neighbourhood.</p>
 
+    <h3>The closest simple ratio</h3>
+    <p>Each card snaps the recipe's five shares to the nearest
+      <b>simple whole-number ratio</b> — the Ruhlman-style reading, e.g.
+      <code>3 : 2 : 1 : 0 : 0</code> (flour : fat : sugar : liquid : egg). The
+      search keeps only primitive ratios (no common divisor) and, among those
+      within <b>0.04</b> of the recipe on every part, returns the simplest one:
+      the smallest largest term, capped at 12. It is a reading aid, not part of
+      the geometry — distances, centroids and classes all use the full
+      shares.</p>
+    <p>Because the ratio may sit up to 0.04 off on any part, it prefers round
+      numbers over an exact match. About <b>2%</b> of the plotted recipes land
+      exactly on a small ratio and the rest are within tolerance; only
+      <b>9 of 28,858</b> (0.03%) have none inside the tolerance and fall back to
+      the closest ratio at the cap.</p>
+
     <h2>Where the data comes from</h2>
     <p class="muted">Three independent corpora meet at exactly one place: the
       numeric Food.com id at the end of each RecipeNLG link. The join is the

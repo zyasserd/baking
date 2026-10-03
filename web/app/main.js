@@ -17,6 +17,7 @@
     partition: "canon2",
     groups: AID.resolveGroups("canon2"),
     selection: -1,
+    focus: null,
     classFilter: [],
     showNeighbourhood: true,
   });

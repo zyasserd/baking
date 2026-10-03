@@ -334,6 +334,17 @@
       tooltip.style.top = Math.max(8, my - 10) + "px";
     }
     function hideTooltip() { tooltip.style.display = "none"; }
+    function showMarkerTooltip(mk, mx, my) {
+      const r = AID.markerRatio(data, mk);
+      const label = (mk.kind === "archetype" ? "\u2605 " : "\u25c6 ") +
+        escapeHtml(mk.id);
+      tooltip.innerHTML = "<b>" + label + "</b><br><code>" +
+        (r ? AID.formatRatio(r) : "\u2014") + "</code>";
+      tooltip.style.display = "block";
+      const tw = tooltip.offsetWidth;
+      tooltip.style.left = Math.min(W - tw - 8, mx + 14) + "px";
+      tooltip.style.top = Math.max(8, my - 10) + "px";
+    }
     function escapeHtml(s) {
       return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     }
@@ -385,19 +396,23 @@
         return;
       }
       if (e.pointerType === "mouse") {
+        const mk = painter && painter.markerAt ? painter.markerAt(mx, my) : null;
         let idx = painter ? painter.hit(mx, my) : -1;
         // In selected mode only highlighted points are interactive: a dim point
         // gets no hover ring and no tooltip either.
         if (idx >= 0 && painter.selectedMode && painter.selectedMode()
             && !painter.isHighlighted(idx)) idx = -1;
         const overMerge = painter && painter.mergeHit && painter.mergeHit(mx, my);
-        canvas.style.cursor = overMerge ? "pointer" : "";
+        if (mk) idx = -1; // markers win over the dots underneath
+        canvas.style.cursor = (overMerge || mk) ? "pointer" : "";
         if (idx !== hover) {
           hover = idx;
           painter.hover = idx;
           markDirty();
         }
-        if (idx >= 0) showTooltip(idx, mx, my); else hideTooltip();
+        if (mk) showMarkerTooltip(mk, mx, my);
+        else if (idx >= 0) showTooltip(idx, mx, my);
+        else hideTooltip();
       }
     });
 
@@ -425,8 +440,14 @@
           }
           // pick(), not hit(): in selected mode a click near a highlighted
           // point snaps to it; a click on empty space clears the selection.
-          const idx = painter ? painter.pick(mx, my) : -1;
-          store.set({ selection: idx >= 0 ? idx : -1 });
+          // A marker (star/diamond) wins over the dots under it.
+          const mk = painter && painter.markerAt ? painter.markerAt(mx, my) : null;
+          if (mk) {
+            store.set({ focus: { kind: mk.kind, id: mk.id }, selection: -1 });
+          } else {
+            const idx = painter ? painter.pick(mx, my) : -1;
+            store.set({ selection: idx >= 0 ? idx : -1, focus: null });
+          }
         }
         if (painter) painter.hover = -1;
         hideTooltip();

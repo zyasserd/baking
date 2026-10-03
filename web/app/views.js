@@ -72,23 +72,72 @@
       /* A point is pickable only when no search/filter is active or when it
        * survives that filter: you can never open a recipe the query excluded. */
       matchActive: i => { const m = store.get().matches; return !m || !!m[i]; },
+      /* The selected marker (a book archetype star or a class-mean diamond),
+       * or null. Markers are not recipes: selecting one clears the recipe
+       * selection and highlights a family instead of drawing a neighbourhood. */
+      focus: () => store.get().focus || null,
+      /* The family a marker highlights: a class-mean marker is its own class,
+       * an archetype star uses the hand-picked ARCHETYPE_FAMILY map. */
+      focusClass: function () {
+        const f = store.get().focus;
+        if (!f) return null;
+        return f.kind === "class" ? f.id : (AID.ARCHETYPE_FAMILY[f.id] || null);
+      },
       /* "Selected mode": something is highlighted, so clicks may only land on
-       * the highlighted points. That is a search/filter (matches), or a
-       * selection whose neighbourhood is drawn — the clicked recipe's family
-       * and its disc/band/ball. */
+       * the highlighted points. That is a search/filter (matches), a marker
+       * (its family), or a selection whose neighbourhood is drawn — the
+       * clicked recipe's family and its disc/band/ball. */
       selectedMode: function () {
         const st = store.get();
-        return !!st.matches || (st.selection >= 0 && !!this.nb);
+        return !!st.matches || !!st.focus || (st.selection >= 0 && !!this.nb);
       },
       /* Whether point i is one of the highlighted points (mirrors vis()). */
       isHighlighted: function (i) {
         const st = store.get();
         const m = st.matches;
         if (m && !m[i]) return false;
+        const fc = this.focusClass();
+        if (fc) return data.recipes.cls[i] === fc;
         const nb = this.nb;
         if (!nb) return true;
         const sel = st.selection, cls = data.recipes.cls;
         return (sel >= 0 && cls[i] === cls[sel]) || !!nb.mask[i];
+      },
+      /* Markers drawn by the current view, in screen space (set by draw()).
+       * Returns the nearest one within its hit radius, or null. A `tall`
+       * marker (the 1-D archetype tick) ignores y except for a vertical band. */
+      markerAt: function (mx, my) {
+        let best = null, bd = Infinity;
+        for (const mk of this._markers || []) {
+          if (mk.tall) {
+            if (my < mk.y0 || my > mk.y1) continue;
+          }
+          const dx = mx - mk.x, dy = mk.tall ? 0 : my - mk.y;
+          const d = Math.hypot(dx, dy);
+          if (d <= mk.r && d < bd) { bd = d; best = mk; }
+        }
+        return best;
+      },
+      /* Ring the selected marker so it reads as chosen over the dots. */
+      drawFocusMarks: function (ctx) {
+        const f = this.focus();
+        if (!f) return;
+        for (const mk of this._markers || []) {
+          if (mk.kind !== f.kind || mk.id !== f.id) continue;
+          const r = mk.kind === "archetype" ? 13 : 11;
+          ctx.save();
+          ctx.strokeStyle = "#262626";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(mk.x, mk.y, r, 0, 6.2832);
+          ctx.stroke();
+          ctx.strokeStyle = "#fff";
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.arc(mk.x, mk.y, r + 2, 0, 6.2832);
+          ctx.stroke();
+          ctx.restore();
+        }
       },
       /* archetype frame coords for this partition */
       archBary: AID.bary(data.archetypes.map(a => a.P), cache.groups),
@@ -139,14 +188,16 @@
     ctx.fillText(text, x, y);
   }
 
-  /* Visibility of point i. `sameFam` = the point shares the selected recipe's
-   * family (always highlighted). Under a selection, a point is active if it is
-   * same-family or inside the disc; the rest of a search/filter context is
-   * whispered. A search and a selection both constrain, so they intersect. */
-  function vis(m, nb, i, sameFam) {
-    if (!m && !nb) return { active: true, context: false };
+  /* Visibility of point i. `sameFam` = the point shares the highlighted
+   * family (the selected recipe's class, or a selected marker's family, both
+   * of which are always highlighted). Under a selection, a point is active if
+   * it is same-family or inside the disc; the rest of a search/filter context
+   * is whispered. A marker highlights only its family (no disc). A search and
+   * a selection both constrain, so they intersect. */
+  function vis(m, nb, i, sameFam, focusOn) {
+    if (!m && !nb && !focusOn) return { active: true, context: false };
     return {
-      active: (!m || !!m[i]) && (!nb || sameFam || !!nb.mask[i]),
+      active: (!m || !!m[i]) && (focusOn ? sameFam : (!nb || sameFam || !!nb.mask[i])),
       context: true,
     };
   }
@@ -340,21 +391,6 @@
     ctx.restore();
   }
 
-  /* Class barycentre in frame space (frame is linear in the group shares, so
-   * the mean of the projected points is the projection of the mean shares). */
-  function classCentroids(data, frame, n) {
-    const sums = {}, cnt = {}, cls = data.recipes.cls;
-    for (let i = 0; i < n; i++) {
-      const c = cls[i];
-      let s = sums[c];
-      if (!s) { s = sums[c] = [0, 0]; cnt[c] = 0; }
-      s[0] += frame[i * 2]; s[1] += frame[i * 2 + 1]; cnt[c]++;
-    }
-    const out = [];
-    for (const c in sums) out.push([c, sums[c][0] / cnt[c], sums[c][1] / cnt[c]]);
-    return out;
-  }
-
   function diamond(ctx, x, y, r, fill) {
     ctx.beginPath();
     ctx.moveTo(x, y - r); ctx.lineTo(x + r, y);
@@ -432,8 +468,10 @@
       }
 
       const sel = this.sel();
-      const sameBase = sel >= 0 ? this.data.recipes.cls[sel] : null;
-      const nb = this.store.get().showNeighbourhood
+      const focusOn = !!this.focusClass();
+      const sameBase = focusOn ? this.focusClass()
+        : (sel >= 0 ? this.data.recipes.cls[sel] : null);
+      const nb = (!focusOn && this.store.get().showNeighbourhood && sel >= 0)
         ? frameNeighbours(this.data, n, sel, AID.NEIGHBOURHOOD_R,
           cache.bary, groups.length)
         : null;
@@ -446,7 +484,7 @@
       for (let i = 0; i < n; i++) {
         if (i === sel) continue; // the selected dot is drawn on top, last
         const sameFam = sameBase !== null && clsArr[i] === sameBase;
-        const v = vis(m, nb, i, sameFam);
+        const v = vis(m, nb, i, sameFam, focusOn);
         // a dimmed dot uses the pale colour so a dense pile stays subdued
         ctx.fillStyle = (v.context && !v.active)
           ? this.cache.dimColors[i] : this.cache.colors[i];
@@ -461,12 +499,25 @@
       if (nb) drawDisc(ctx, this.sx(frame[sel * 2]), this.sy(frame[sel * 2 + 1]),
         AID.NEIGHBOURHOOD_R * this.s);
 
-      // marker positions (centroids and archetypes), used by the dotted links
-      const cents = classCentroids(this.data, frame, n);
-      const atmp = [0, 0], archPos = {};
+      // markers: class centres (geometric mean) and book archetypes. Positions
+      // are kept in frame space and projected to screen for drawing/picking.
+      const cmeans = AID.classMeanMap(this.data.recipes.P, clsArr);
+      const cents = [], atmp = [0, 0], archPos = {};
+      for (const c in cmeans) {
+        AID.project2(AID.bary([cmeans[c]], groups), atmp);
+        cents.push([c, atmp[0], atmp[1]]);
+      }
       for (let a = 0; a < this.archBary.length / 3; a++) {
         AID.project2(this.archBary.subarray(a * 3, a * 3 + 3), atmp);
-        archPos[this.data.archetypes[a].name] = [this.sx(atmp[0]), this.sy(atmp[1])];
+        archPos[this.data.archetypes[a].name] = [atmp[0], atmp[1]];
+      }
+      this._markers = [];
+      for (const [c, x, y] of cents) {
+        this._markers.push({ kind: "class", id: c, x: this.sx(x), y: this.sy(y), r: 12 });
+      }
+      for (const nm in archPos) {
+        this._markers.push({ kind: "archetype", id: nm,
+          x: this.sx(archPos[nm][0]), y: this.sy(archPos[nm][1]), r: 14 });
       }
 
       // dotted lines to the nearest centroid and nearest book archetype
@@ -479,19 +530,22 @@
           if (c === nc.name) dottedLink(ctx, x1, y1, this.sx(x), this.sy(y));
         }
         if (archPos[na.name]) {
-          dottedLink(ctx, x1, y1, archPos[na.name][0], archPos[na.name][1]);
+          dottedLink(ctx, x1, y1, this.sx(archPos[na.name][0]), this.sy(archPos[na.name][1]));
         }
       }
 
-      // markers over everything: class centroids, then book archetypes
+      // markers over everything: class centres, then book archetypes
+      const focus = this.focus();
       for (const [c, x, y] of cents) diamond(ctx, this.sx(x), this.sy(y), 5.5, AID.colorOf(c));
       ctx.fillStyle = "#3a3a35";
       for (let a = 0; a < this.archBary.length / 3; a++) {
         const ap = archPos[this.data.archetypes[a].name];
-        star(ctx, ap[0], ap[1], 8);
+        star(ctx, this.sx(ap[0]), this.sy(ap[1]), 8);
         ctx.font = "600 11px system-ui, sans-serif";
-        ctx.fillText(this.data.archetypes[a].name, ap[0], ap[1] - 12);
+        ctx.fillText(this.data.archetypes[a].name,
+          this.sx(ap[0]), this.sy(ap[1]) - 12);
       }
+      this.drawFocusMarks(ctx);
 
       // the selected dot, always drawn last at near-full strength so it is
       // never hidden by the cloud it sits in
@@ -709,11 +763,32 @@
       });
       this._xp = xp; this._yp = yp; // kept for pick() below
       const sel = this.sel();
-      const sameBase = sel >= 0 ? this.data.recipes.cls[sel] : null;
-      const nb = this.store.get().showNeighbourhood
+      const focusOn = !!this.focusClass();
+      const sameBase = focusOn ? this.focusClass()
+        : (sel >= 0 ? this.data.recipes.cls[sel] : null);
+      const nb = (!focusOn && this.store.get().showNeighbourhood && sel >= 0)
         ? frameNeighbours(this.data, n, sel, AID.NEIGHBOURHOOD_R, cache.bary, k)
         : null;
       this.nb = nb;
+
+      // class centres (geometric mean) on this axis, and archetype ticks —
+      // kept in screen space so they can be picked like the markers in 2D/3D
+      const cmeans = AID.classMeanMap(this.data.recipes.P, this.data.recipes.cls);
+      const meanVal = {};
+      for (const c in cmeans) meanVal[c] = AID.bary([cmeans[c]], groups)[0] * 100;
+      this._markers = [];
+      for (const c in meanVal) {
+        const r = order.indexOf(c);
+        if (r < 0) continue;
+        this._markers.push({ kind: "class", id: c,
+          x: sx(meanVal[c]), y: TOP + r * rowH + rowH / 2, r: 12 });
+      }
+      for (let a = 0; a < this.archBary.length / k; a++) {
+        const v = this.archBary[a * k] * 100;
+        if (v < X0 || v > X1) continue;
+        this._markers.push({ kind: "archetype", id: this.data.archetypes[a].name,
+          x: sx(v), y: (TOP + H_ - 30) / 2, tall: true, y0: TOP, y1: H_ - 30, r: 10 });
+      }
 
       order.forEach((c, r) => {
         const yTop = TOP + r * rowH, yMid = yTop + rowH / 2;
@@ -745,12 +820,10 @@
         const m = this.store.get().matches;
         const fade = this.cache.fade == null ? 1 : this.cache.fade;
         const clsArr = this.data.recipes.cls;
-        let sum = 0;
         for (const i of pts) {
-          sum += values[i];
           if (i === sel) continue; // drawn on top, after every row
           const sameFam = sameBase !== null && clsArr[i] === sameBase;
-          const v = vis(m, nb, i, sameFam);
+          const v = vis(m, nb, i, sameFam, focusOn);
           // a dimmed dot uses the pale colour so a dense pile stays subdued
           ctx.fillStyle = (v.context && !v.active)
             ? AID.dimColorOf(c) : AID.colorOf(c);
@@ -761,8 +834,8 @@
         }
         ctx.globalAlpha = 1;
 
-        // class barycentre on this row
-        if (pts.length) diamond(ctx, sx(sum / pts.length), yMid, 5.5, AID.colorOf(c));
+        // class centre (geometric mean) on this row
+        if (pts.length) diamond(ctx, sx(meanVal[c]), yMid, 5.5, AID.colorOf(c));
 
         // archetype ticks
         ctx.strokeStyle = "#3a3a35";
@@ -781,6 +854,7 @@
         ctx.font = "600 12px system-ui, sans-serif";
         ctx.fillText(c, plotL - 12, yMid + 4);
       });
+      this.drawFocusMarks(ctx);
 
       if (nb) {
         const rv = AID.NEIGHBOURHOOD_R * 100; // share units -> percent
@@ -995,8 +1069,10 @@
 
       const sel = this.sel();
       const clsArr = this.data.recipes.cls;
-      const sameBase = sel >= 0 ? clsArr[sel] : null;
-      const nb = this.store.get().showNeighbourhood
+      const focusOn = !!this.focusClass();
+      const sameBase = focusOn ? this.focusClass()
+        : (sel >= 0 ? clsArr[sel] : null);
+      const nb = (!focusOn && this.store.get().showNeighbourhood && sel >= 0)
         ? frameNeighbours(this.data, n, sel, AID.NEIGHBOURHOOD_R,
           cache.bary, groups.length)
         : null;
@@ -1009,7 +1085,7 @@
         const i = order ? order[k] : k;
         if (i === sel) continue; // the selected dot is drawn on top, last
         const sameFam = sameBase !== null && clsArr[i] === sameBase;
-        const v = vis(m, nb, i, sameFam);
+        const v = vis(m, nb, i, sameFam, focusOn);
         // a dimmed dot uses the pale colour so a dense pile stays subdued
         ctx.fillStyle = (v.context && !v.active)
           ? this.cache.dimColors[i] : this.cache.colors[i];
@@ -1026,17 +1102,30 @@
       if (nb) drawDisc(ctx, sx(screen[sel * 2]), sy(screen[sel * 2 + 1]),
         AID.NEIGHBOURHOOD_R * T.s);
 
-      // marker positions (centroids and archetypes), used by the dotted links
-      const cents = classCentroids(this.data, screen, n);
-      const archPos = {};
+      // markers: class centres (geometric mean) and book archetypes. Positions
+      // are kept in projected space and mapped to screen for drawing/picking.
+      const cmeans = AID.classMeanMap(this.data.recipes.P, clsArr);
+      const cents = [], archPos = {};
+      for (const c in cmeans) {
+        AID.project3(AID.bary([cmeans[c]], groups), yaw, pitch, tmp);
+        cents.push([c, tmp[0], tmp[1]]);
+      }
       for (let a = 0; a < this.archBary.length / 4; a++) {
         if (this.arch) {
           archPos[this.data.archetypes[a].name] =
-            [sx(this.arch[a][0]), sy(this.arch[a][1])];
+            [this.arch[a][0], this.arch[a][1]];
         } else {
           AID.project3(this.archBary.subarray(a * 4, a * 4 + 4), yaw, pitch, tmp);
-          archPos[this.data.archetypes[a].name] = [sx(tmp[0]), sy(tmp[1])];
+          archPos[this.data.archetypes[a].name] = [tmp[0], tmp[1]];
         }
+      }
+      this._markers = [];
+      for (const [c, x, y] of cents) {
+        this._markers.push({ kind: "class", id: c, x: sx(x), y: sy(y), r: 12 });
+      }
+      for (const nm in archPos) {
+        this._markers.push({ kind: "archetype", id: nm,
+          x: sx(archPos[nm][0]), y: sy(archPos[nm][1]), r: 14 });
       }
 
       // dotted lines to the nearest centroid and nearest book archetype
@@ -1049,19 +1138,20 @@
           if (c === nc.name) dottedLink(ctx, x1, y1, sx(x), sy(y));
         }
         if (archPos[na.name]) {
-          dottedLink(ctx, x1, y1, archPos[na.name][0], archPos[na.name][1]);
+          dottedLink(ctx, x1, y1, sx(archPos[na.name][0]), sy(archPos[na.name][1]));
         }
       }
 
-      // markers over everything: class centroids, then book archetypes
+      // markers over everything: class centres, then book archetypes
       for (const [c, x, y] of cents) diamond(ctx, sx(x), sy(y), 5.5, AID.colorOf(c));
       ctx.fillStyle = "#3a3a35";
       for (let a = 0; a < this.archBary.length / 4; a++) {
         const ap = archPos[this.data.archetypes[a].name];
-        star(ctx, ap[0], ap[1], 8);
+        star(ctx, sx(ap[0]), sy(ap[1]), 8);
         ctx.font = "600 11px system-ui, sans-serif";
-        ctx.fillText(this.data.archetypes[a].name, ap[0], ap[1] - 12);
+        ctx.fillText(this.data.archetypes[a].name, sx(ap[0]), sy(ap[1]) - 12);
       }
+      this.drawFocusMarks(ctx);
 
       // the selected dot, drawn last so it is never hidden by the cloud
       if (sel >= 0) {
