@@ -108,11 +108,23 @@
       }
     }
 
-    if (out.length === 0) {
-      out.push({ type: "keyword", label: text.trim() });
-    }
+    // Substring search over recipe names. Always offered (not just as a
+    // fallback) so a recipe name is searchable even when an ingredient or class
+    // also matches; the "name" tag and count make it clear what it does.
+    const kw = text.trim();
+    if (kw) out.push({ type: "keyword", label: kw, count: nameCount(kw, data) });
     return out;
   };
+
+  function nameCount(text, data) {
+    const needle = text.toLowerCase();
+    const names = data.recipes && data.recipes.name ? data.recipes.name : [];
+    let n = 0;
+    for (let i = 0; i < names.length; i++) {
+      if (names[i].toLowerCase().includes(needle)) n++;
+    }
+    return n;
+  }
 
   function groupText(idx) {
     return idx.map(p => AID.PART_NAMES[p]).join("+");

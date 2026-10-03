@@ -331,6 +331,18 @@ h1 { font-size: 15px; font-weight: 650; letter-spacing: 0.01em; }
 .suggestion.keyword { border-left-color: #f28e2b; }
 .scount { color: var(--muted); font-size: 12px; }
 
+.stype {
+  margin-left: 6px;
+  padding: 0 4px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
 .chip {
   display: inline-flex;
   align-items: center;

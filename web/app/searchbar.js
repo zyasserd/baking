@@ -240,6 +240,12 @@
         const name = document.createElement("span");
         if (s.type === "keyword" || s.type === "op") name.textContent = s.label;
         else name.appendChild(highlight(s.label, raw));
+        if (s.type === "keyword") {
+          const tag = document.createElement("span");
+          tag.className = "stype";
+          tag.textContent = "name";
+          name.appendChild(tag);
+        }
         item.appendChild(name);
         if (s.count !== undefined) {
           const c = document.createElement("span");

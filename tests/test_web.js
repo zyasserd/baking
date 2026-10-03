@@ -206,6 +206,14 @@ ok(AID.vertexName(0) === "A" && AID.vertexName(3) === "D", "vertex letters A-D")
   ok(rsugg.some(s => s.type === "ratio" && s.target.key === undefined && s.target.idx[0] === 4),
      "suggest ratio targets");
 
+  // a recipe-name substring is always offered, with its match count, even when
+  // an ingredient or class also matches
+  const nk = AID.suggest("cake", data).filter(s => s.type === "keyword");
+  ok(nk.length === 1 && nk[0].label === "cake" && nk[0].count === 2,
+     "suggest always offers a name keyword with its count");
+  ok(AID.suggest("chocolate", data).some(s => s.type === "keyword" && s.label === "chocolate"),
+     "name keyword offered alongside an ingredient match");
+
   // ingredient OR within group
   let r = AID.runSearch([
     { type: "ingredient", label: "chocolate chips", head: "chocolate chips" },
